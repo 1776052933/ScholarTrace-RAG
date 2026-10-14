@@ -1,0 +1,32 @@
+# Local credentials and environment
+API_key/API_key.json
+.env
+.env.*
+!.env.example
+
+# Python and editor files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.idea/
+.vscode/
+
+# Runtime data and generated artifacts
+data/
+papers/
+logs/
+output/
+tmp/
+Auto_Paper_UI/runtime/
+Auto_Paper_UI/outputs/
+evaluation/data/
+evaluation/runs/
+*.sqlite3
+*.sqlite3-*
+*.db
+*.log
+download_history.json
+full_result.json
+result.json

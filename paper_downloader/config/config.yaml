@@ -1,0 +1,62 @@
+# ============================================================
+# Paper Downloader — 论文自动下载器配置
+# ============================================================
+
+# ---- 下载路径 ----
+download:
+  path: "./papers"              # PDF 保存根目录
+  organize_by: "flat"           # 组织方式: flat | year | author
+  filename_template: "{first_author}_{year}_{title}"  # 文件名模板
+  source_engines:               # PDF 地址解析优先级
+    - arxiv
+    - direct
+    - openalex
+    - semantic_scholar
+    - unpaywall
+    - europe_pmc
+  resolve_all_sources: false    # 已有可靠直链时不额外请求其他开放源
+
+# ---- 搜索引擎 ----
+search:
+  engines:                      # 启用的搜索引擎列表
+    - arxiv
+    - openalex
+    - semantic_scholar
+    - crossref
+    # - google_scholar          # 需设置代理或使用 scholarly 的免费代理池
+  max_results: 20               # 单次搜索最大返回数
+  sort_by: "relevance"          # 排序依据: relevance | date | citations
+  min_year: null                # 最早发表年份（null = 不限）
+  language: "en"                # 论文语言过滤
+
+# ---- 并发控制 ----
+concurrency:
+  max_downloads: 3              # 最大并发下载数
+  max_resolvers: 4              # DOI 开放获取来源并行解析数
+  request_delay: 1.0            # 请求间隔（秒），避免被封 IP
+
+# ---- 超时设置 ----
+timeout:
+  search: 30                    # 搜索超时（秒）
+  download: 120                 # 单篇下载超时（秒）
+  connection: 10                # 连接超时（秒）
+
+# ---- 代理（可选）----
+proxy:
+  enabled: false
+  http: ""                      # http://host:port
+  https: ""                     # https://host:port
+  username: ""                  # 代理认证用户名（可选）
+  password: ""                  # 代理认证密码（可选）
+
+# ---- 日志 ----
+logging:
+  level: "INFO"                 # DEBUG | INFO | WARNING | ERROR
+  file: "./logs/paper_downloader.log"
+  max_bytes: 10485760           # 10 MB 自动轮转
+  backup_count: 5               # 保留最近 5 个日志文件
+
+# ---- 重试 ----
+retry:
+  max_attempts: 3               # 最大重试次数
+  backoff_factor: 2             # 退避因子（指数退避）

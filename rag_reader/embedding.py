@@ -1,0 +1,150 @@
+"""使用 sentence-transformers 生成论文文本和 Chunk 向量。"""
+
+from hashlib import blake2b
+import logging
+import math
+import re
+from threading import Lock
+from typing import Any, ClassVar, Dict, Iterable, List, Optional, Tuple
+
+from .schema import DocumentChunk
+
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_EMBEDDING_MODEL = "BAAI/bge-m3"
+
+
+class EmbeddingModel:
+    """支持中英文论文内容的 BGE-M3 向量模型。"""
+
+    _model_cache: ClassVar[Dict[Tuple[str, Optional[str]], Any]] = {}
+    _cache_lock: ClassVar[Lock] = Lock()
+
+    def __init__(
+        self,
+        model_name: str = DEFAULT_EMBEDDING_MODEL,
+        *,
+        device: Optional[str] = None,
+        batch_size: int = 32,
+        normalize_embeddings: bool = True,
+    ) -> None:
+        model_name = model_name.strip()
+        if not model_name:
+            raise ValueError("model_name must not be empty")
+        if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:
+            raise ValueError("batch_size must be a positive integer")
+        self.model_name = model_name
+        self.device = device.strip() if isinstance(device, str) and device.strip() else None
+        self.batch_size = batch_size
+        self.normalize_embeddings = bool(normalize_embeddings)
+
+    def embed(self, text: str) -> List[float]:
+        """将一段中文或英文文本编码为一维浮点向量。"""
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+        if not text.strip():
+            raise ValueError("text must not be empty")
+        vector = self._get_model().encode(
+            text.strip(),
+            convert_to_numpy=True,
+            normalize_embeddings=self.normalize_embeddings,
+            show_progress_bar=False,
+        )
+        return _vector(vector)
+
+    def embed_chunks(self, chunks: Iterable[DocumentChunk]) -> List[List[float]]:
+        """批量编码 DocumentChunk，返回顺序与输入顺序一致。"""
+        values = list(chunks)
+        if not values:
+            return []
+        for index, chunk in enumerate(values):
+            if not isinstance(chunk, DocumentChunk):
+                raise TypeError(f"chunks[{index}] must be a DocumentChunk")
+
+        embeddings = self._get_model().encode(
+            [chunk.text for chunk in values],
+            batch_size=self.batch_size,
+            convert_to_numpy=True,
+            normalize_embeddings=self.normalize_embeddings,
+            show_progress_bar=False,
+        )
+        if hasattr(embeddings, "tolist"):
+            embeddings = embeddings.tolist()
+        if not isinstance(embeddings, (list, tuple)) or len(embeddings) != len(values):
+            raise TypeError("sentence-transformers returned an invalid embedding batch")
+        return [_vector(vector) for vector in embeddings]
+
+    def _get_model(self) -> Any:
+        key = (self.model_name, self.device)
+        model = self._model_cache.get(key)
+        if model is not None:
+            return model
+        with self._cache_lock:
+            model = self._model_cache.get(key)
+            if model is None:
+                try:
+                    from sentence_transformers import SentenceTransformer
+                except ImportError as exc:
+                    raise ImportError(
+                        "EmbeddingModel requires sentence-transformers: "
+                        "pip install sentence-transformers"
+                    ) from exc
+                kwargs = {"device": self.device} if self.device else {}
+                logger.info("加载 RAG 向量模型：%s，device=%s", self.model_name, self.device or "auto")
+                try:
+                    model = SentenceTransformer(
+                        self.model_name,
+                        model_kwargs={"use_safetensors": True},
+                        **kwargs,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "RAG 向量模型 %s 加载失败，使用本地哈希向量回退：%s",
+                        self.model_name,
+                        exc,
+                    )
+                    model = _HashingEncoder()
+                self._model_cache[key] = model
+        return model
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        """清除进程级模型缓存，供测试或显存切换使用。"""
+        with cls._cache_lock:
+            cls._model_cache.clear()
+
+
+def _vector(value: Any) -> List[float]:
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    if not isinstance(value, (list, tuple)):
+        raise TypeError("sentence-transformers returned an invalid embedding")
+    try:
+        return [float(item) for item in value]
+    except (TypeError, ValueError) as exc:
+        raise TypeError("embedding must contain numeric values") from exc
+
+
+class _HashingEncoder:
+    """在 BGE-M3 不可用时保证 RAG 入库和检索可继续执行。"""
+
+    dimension = 1024
+
+    def encode(self, texts: Any, **_: Any) -> Any:
+        if isinstance(texts, str):
+            return _hash_vector(texts, self.dimension)
+        return [_hash_vector(str(text), self.dimension) for text in texts]
+
+
+def _hash_vector(text: str, dimension: int) -> List[float]:
+    normalized = text.casefold().strip()
+    words = re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]", normalized)
+    features = [*words, *(f"{a}:{b}" for a, b in zip(words, words[1:]))]
+    vector = [0.0] * dimension
+    for feature in features:
+        digest = blake2b(feature.encode("utf-8"), digest_size=8).digest()
+        number = int.from_bytes(digest, "big")
+        vector[number % dimension] += -1.0 if number & 1 else 1.0
+    norm = math.sqrt(sum(value * value for value in vector))
+    return [value / norm for value in vector] if norm else vector

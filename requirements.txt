@@ -1,0 +1,20 @@
+# Auto_paper core
+pydantic>=2.0
+openai>=1.0
+SQLAlchemy>=2.0
+requests>=2.31
+PyYAML>=6.0
+
+# Query/search and paper sources
+arxiv>=2.0
+beautifulsoup4>=4.12
+lxml>=5.0
+scholarly>=1.7
+crossrefapi>=1.5
+
+# PDF and RAG
+PyMuPDF>=1.23
+PyPDF2>=3.0
+langchain-text-splitters>=0.3
+sentence-transformers>=3.0
+chromadb>=1.0

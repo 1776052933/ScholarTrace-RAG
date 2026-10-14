@@ -1,0 +1,23 @@
+# ============================================================
+# Paper Downloader — 论文自动下载器依赖
+# ============================================================
+
+# HTTP & 解析
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+
+# 配置 & 环境
+python-dotenv>=1.0
+PyYAML>=6.0
+
+# PDF 处理
+PyPDF2>=3.0
+
+# 进度条
+tqdm>=4.66
+
+# 学术数据源
+arxiv>=2.0          # arXiv 官方 Python 客户端
+scholarly>=1.7      # 谷歌学术搜索
+crossrefapi>=1.5    # CrossRef DOI 查询
