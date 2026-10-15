@@ -1,57 +1,25 @@
-# AutoPaper Studio
+# AutoPaper Studio（M2）
 
-这是 AutoPaper 项目的用户界面升级版。研究任务通过子进程调用上一级目录中的 `main.py`，并沿用项目的检索、排序、下载、RAG、摘要和知识抽取逻辑。
+Streamlit 界面通过 HTTP 调用 FastAPI。研究任务由 API 执行，任务进度、结果和论文问答记录写入数据库；刷新界面或重启服务后，可从侧边栏恢复已完成的任务。UI 不再启动 `main.py` 子进程。
 
 ## 主要功能
 
-- 输入研究主题和论文数量
-- 控制下载、RAG、摘要和知识抽取
-- 设置搜索轮次、下载来源和超时
-- 缓存经过校验的论文评分，重复研究时减少 DeepSeek 调用
-- 并发生成 Top 论文摘要和结构化知识
-- 优先使用 PDF URL、arXiv ID 和 DOI，失败后再执行多源标题搜索
-- Top-K 网络下载并发执行，并对损坏文件、HTML 页面和残缺文件做校验
-- 每次研究自动保存脱敏日志，并保留最近 30 次运行
-- 展示 Top 论文及原文链接
-- 研究完成后按论文连续提问，并查看回答和证据片段
-- 导出 Top 论文 Markdown 报告、完整精排论文 CSV 和运行日志
+- 输入研究问题、论文数量和检索选项，启动任务并查看分阶段进度、日志及结果
+- 展示候选论文、下载/入库状态、摘要、知识抽取和引用证据
+- 针对已入库论文继续提问，查看 PDF 页码与原文片段
+- 取消任务、恢复历史任务、导出 Markdown 报告和 CSV
 
-## 首次安装
+## 启动
 
-在 PyCharm Terminal 中执行：
+推荐按[项目根目录的 M2 运行与验收说明](../docs/M2_RUN_AND_ACCEPTANCE.md)用 Docker Compose 启动 MySQL、API 和 UI。无 Docker 时，先启动本地 API 并执行 Alembic 迁移，再启动 UI：
 
 ```powershell
-conda activate pywork
-cd D:\files\Auto_Paper-model
-python -m pip install -r Auto_Paper_UI\requirements-ui.txt
+$env:AUTO_PAPER_API_URL='http://127.0.0.1:8000'
+python -m streamlit run Auto_Paper_UI/ui_app.py --server.address 127.0.0.1
 ```
 
-## 启动界面
+`run_ui.bat` 只启动界面；API 必须先运行。界面会显示 API 连接和服务端模型配置状态。模型、搜索 API Key 及数据库连接配置在 API 进程的环境变量中，界面不会收集或传送密钥。
 
-```powershell
-cd D:\files\Auto_Paper-model
-python -m streamlit run Auto_Paper_UI\ui_app.py
-```
+## 数据与后续阶段
 
-浏览器通常会自动打开 `http://localhost:8501`。也可以在已激活 `pywork` 环境后双击 `run_ui.bat`。
-
-## API 配置
-
-界面会继承启动终端中的 `DEEPSEEK_API_KEY` 和 `SERPAPI_API_KEY`，也会继续使用原项目 `API_key` 目录中的配置。界面中的“临时 API Key”只对当前一次运行有效，不会写入磁盘。
-
-## 数据位置
-
-- PDF：`Auto_Paper_UI/runtime/papers`
-- RAG 向量库：`Auto_Paper_UI/runtime/chroma`
-- 文献数据库：`Auto_Paper_UI/runtime/literature.db`
-- 完整结果：`Auto_Paper_UI/outputs`
-- 运行日志：与结果 JSON 同名，保存在 `Auto_Paper_UI/outputs`
-- 评分缓存：`Auto_Paper_UI/runtime/ranking_evaluations.sqlite3`
-
-这些目录与原命令行项目的数据隔离，便于比赛演示和清理。
-
-## 下载策略
-
-排序结果中的 PDF URL、arXiv ID 和 DOI 会一直传递到下载阶段。系统优先直接下载明确的开放全文；没有精确标识或直链失败时，才回退到 arXiv、OpenAlex、CrossRef、Semantic Scholar、Unpaywall 和 Europe PMC。Top-K 论文并发下载，数据库状态在主线程按排名顺序写入。
-
-界面默认勾选“重试历史失败任务”，用于恢复临时网络错误。命令行重试时请添加 `--retry-failed-downloads`。
+MySQL 存储论文元数据、任务与问答；PDF 和 Chroma 索引放在 `data/m2` 持久化目录。无 Docker 的本地验收可用独立 SQLite 文件，便于运行同一 API/UI 链路。M3 再升级检索索引与召回方法。

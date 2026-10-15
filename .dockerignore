@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+.git
+API_key/API_key.json
+__pycache__
+.pytest_cache
+data
+papers
+Auto_Paper_UI/runtime
+Auto_Paper_UI/outputs
+evaluation/data
+evaluation/runs
+*.sqlite3
+*.db
+*.log

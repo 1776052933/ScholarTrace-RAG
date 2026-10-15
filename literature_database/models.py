@@ -18,7 +18,7 @@ class PaperModel(Base):
     __tablename__ = "papers"
 
     paper_id: Mapped[str] = mapped_column(String(255), primary_key=True)
-    title: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
     authors: Mapped[List[str]] = mapped_column(JSON, nullable=False, default=list)
     abstract: Mapped[str] = mapped_column(Text, nullable=False, default="")
     doi: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, unique=True, index=True)
@@ -55,6 +55,8 @@ class PaperModel(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+
+    __table_args__ = (Index("ix_papers_title", "title", mysql_length=191),)
 
     def __repr__(self) -> str:
         return f"PaperModel(paper_id={self.paper_id!r}, title={self.title!r})"

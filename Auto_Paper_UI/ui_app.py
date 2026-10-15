@@ -6,7 +6,6 @@ import math
 import os
 from datetime import datetime
 from pathlib import Path
-import subprocess
 import sys
 from typing import Any
 
@@ -17,13 +16,14 @@ UI_ROOT = Path(__file__).resolve().parent
 if str(UI_ROOT) not in sys.path:
     sys.path.insert(0, str(UI_ROOT))
 
-from backend import (
+from api_client import (
     RunOptions,
     WorkflowRunError,
     api_status,
     ask_paper_question,
     cancel_workflow,
     poll_workflow,
+    recent_workflows,
     start_workflow,
 )
 from reporting import (
@@ -234,33 +234,13 @@ def render_controls() -> tuple[RunOptions, bool]:
 
     with st.sidebar.expander("API 设置"):
         status = api_status()
-        deepseek_class = "ap-api-ok" if status["deepseek"] else "ap-api-missing"
-        serpapi_class = "ap-api-ok" if status["serpapi"] else "ap-api-missing"
-        openalex_class = "ap-api-ok" if status["openalex"] else "ap-api-missing"
-        deepseek_text = "已从环境变量读取" if status["deepseek"] else "当前未检测到"
-        serpapi_text = "已从环境变量读取" if status["serpapi"] else "当前未检测到"
-        openalex_text = "已从环境变量读取" if status["openalex"] else "当前未检测到"
-        st.markdown(
-            "<div class='ap-api-status'>"
-            "<div class='ap-api-label'>DeepSeek：</div>"
-            f"<div class='{deepseek_class}'>{deepseek_text}</div>"
-            "<div class='ap-api-label'>SerpAPI：</div>"
-            f"<div class='{serpapi_class}'>{serpapi_text}</div>"
-            "<div class='ap-api-label'>OpenAlex：</div>"
-            f"<div class='{openalex_class}'>{openalex_text}</div>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-        deepseek_key = st.text_input(
-            "临时 DeepSeek API Key",
-            type="password",
-            help="仅传给本次运行，不写入文件。留空时使用项目或环境变量中的配置。",
-        )
-        serpapi_key = st.text_input(
-            "临时 SerpAPI Key",
-            type="password",
-            help="仅传给本次运行，不写入文件。",
-        )
+        st.session_state["api_connected"] = status["connected"]
+        st.write("研究 API：" + ("已连接" if status["connected"] else "未连接"))
+        st.write("MySQL/数据库：" + ("可用" if status["database"] else "不可用"))
+        for label, key in (("DeepSeek", "deepseek"), ("SerpAPI", "serpapi"), ("OpenAlex", "openalex")):
+            st.write(f"{label}：" + ("服务端已配置" if status[key] else "服务端未配置"))
+        if not status["connected"]:
+            st.warning("请先启动研究 API，再提交任务。")
 
     workflow_active = bool(st.session_state.get("active_workflow_job_id"))
     run_clicked = st.sidebar.button(
@@ -292,9 +272,6 @@ def render_controls() -> tuple[RunOptions, bool]:
         download_engine=download_engine,
         download_timeout=int(download_timeout),
         retry_failed_downloads=retry_failed,
-        log_level="INFO",
-        deepseek_api_key=deepseek_key.strip() or None,
-        serpapi_api_key=serpapi_key.strip() or None,
     )
     return options, run_clicked
 
@@ -316,7 +293,6 @@ def execute(options: RunOptions) -> None:
         return
 
     st.session_state["active_workflow_job_id"] = job_id
-    st.session_state["active_deepseek_api_key"] = options.deepseek_api_key
     st.session_state.pop("result", None)
     st.session_state.pop("output_path", None)
     st.session_state.pop("log_path", None)
@@ -330,38 +306,25 @@ def cancel_active_workflow() -> None:
         return
     try:
         snapshot = cancel_workflow(str(job_id))
-    except (KeyError, OSError, subprocess.SubprocessError) as exc:
-        st.session_state["workflow_notice"] = {
-            "level": "error",
-            "message": f"取消检索失败：{exc}",
-            "log_path": None,
-        }
+    except WorkflowRunError as exc:
+        st.session_state["workflow_notice"] = {"level": "error", "message": f"取消检索失败：{exc}"}
     else:
-        status = snapshot.get("status")
-        if status == "completed":
+        if snapshot.get("status") == "completed":
             _store_completed_workflow(snapshot)
-            st.session_state["workflow_notice"] = {
-                "level": "success",
-                "message": "检索在取消指令到达前已经完成，结果已保留。",
-                "log_path": str(snapshot.get("log_path") or ""),
-            }
+            st.session_state.pop("active_workflow_job_id", None)
+        elif snapshot.get("status") in {"cancelled", "failed", "interrupted"}:
+            st.session_state.pop("active_workflow_job_id", None)
         else:
             st.session_state["workflow_notice"] = {
-                "level": "warning",
-                "message": (
-                    "本次检索已取消。已完成并核验的 PDF 与有效缓存已保留，"
-                    "不完整结果不会作为正式研究结果展示。"
-                ),
-                "log_path": str(snapshot.get("log_path") or ""),
+                "level": "info",
+                "message": "已请求取消。当前步骤结束后将停止，请等待任务状态更新。",
             }
-    st.session_state.pop("active_workflow_job_id", None)
     st.rerun()
 
 
 def _store_completed_workflow(snapshot: dict[str, Any]) -> None:
     st.session_state["result"] = snapshot.get("result")
-    st.session_state["output_path"] = str(snapshot.get("output_path") or "")
-    st.session_state["log_path"] = str(snapshot.get("log_path") or "")
+    st.session_state["logs"] = list(snapshot.get("logs") or [])
 
 
 @st.fragment(run_every=1.0)
@@ -371,46 +334,30 @@ def render_active_workflow() -> None:
         return
     try:
         snapshot = poll_workflow(str(job_id))
-    except KeyError:
-        st.session_state.pop("active_workflow_job_id", None)
-        st.session_state["workflow_notice"] = {
-            "level": "error",
-            "message": "运行任务已丢失，可能是服务已重新启动，请重新发起检索。",
-            "log_path": None,
-        }
-        st.rerun()
+    except WorkflowRunError as exc:
+        st.error(f"暂时无法查询任务：{exc}")
         return
 
-    if snapshot.get("status") == "running":
-        logs = [str(line) for line in snapshot.get("logs", []) or []]
-        percentage, label = _workflow_progress(logs)
-        status_box = st.status("正在运行研究工作流", state="running", expanded=True)
-        status_box.write(f"正在执行：{label}")
-        status_box.caption("需要终止时，请点击左侧“取消检索”。")
-        st.progress(percentage, text=label)
+    status = snapshot.get("status")
+    if status in {"queued", "running", "cancelling"}:
+        stage = str(snapshot.get("stage") or "")
+        label = STAGE_LABELS.get(stage, "准备运行环境")
+        if status == "cancelling":
+            label = "等待当前步骤结束后取消"
+        with st.status("正在运行研究工作流", state="running", expanded=True):
+            st.write(f"正在执行：{label}")
+            st.caption("任务状态由 API 持久化；刷新页面后可从最近任务中恢复。")
+        st.progress(int(snapshot.get("progress") or 0), text=label)
         return
 
     st.session_state.pop("active_workflow_job_id", None)
-    status = snapshot.get("status")
     if status == "completed":
         _store_completed_workflow(snapshot)
-        st.session_state["workflow_notice"] = {
-            "level": "success",
-            "message": "检索与处理已完成。",
-            "log_path": str(snapshot.get("log_path") or ""),
-        }
+        st.session_state["workflow_notice"] = {"level": "success", "message": "检索与处理已完成。"}
     elif status == "cancelled":
-        st.session_state["workflow_notice"] = {
-            "level": "warning",
-            "message": "本次检索已取消，不完整结果未作为正式结果展示。",
-            "log_path": str(snapshot.get("log_path") or ""),
-        }
+        st.session_state["workflow_notice"] = {"level": "warning", "message": "本次检索已取消，已完成的论文资源保留。", "logs": snapshot.get("logs")}
     else:
-        st.session_state["workflow_notice"] = {
-            "level": "error",
-            "message": str(snapshot.get("error") or "检索运行失败。"),
-            "log_path": str(snapshot.get("log_path") or ""),
-        }
+        st.session_state["workflow_notice"] = {"level": "error", "message": str(snapshot.get("error") or "检索运行失败。"), "logs": snapshot.get("logs")}
     st.rerun()
 
 
@@ -441,13 +388,12 @@ def render_workflow_notice() -> None:
     level = str(notice.get("level") or "info")
     message = str(notice.get("message") or "")
     getattr(st, level if level in {"success", "warning", "error", "info"} else "info")(message)
-    log_path = str(notice.get("log_path") or "")
-    resolved_log = Path(log_path) if log_path else None
-    if resolved_log is not None and resolved_log.is_file() and level in {"warning", "error"}:
+    logs = list(notice.get("logs") or [])
+    if logs and level in {"warning", "error"}:
         st.download_button(
             "下载本次运行日志",
-            data=resolved_log.read_bytes(),
-            file_name=resolved_log.name,
+            data=("\n".join(logs) + "\n").encode("utf-8"),
+            file_name="scholartrace_job.log",
             mime="text/plain",
             key="workflow_notice_log_download",
         )
@@ -500,7 +446,7 @@ def render_result(
     with overview_tab:
         render_overview(result)
     with export_tab:
-        render_exports(result, st.session_state.get("log_path"))
+        render_exports(result, st.session_state.get("logs"))
 
 
 def render_papers(papers: list[dict[str, Any]]) -> None:
@@ -1355,7 +1301,7 @@ def _availability_label(value: Any) -> str:
     return labels.get(text, text or "-")
 
 
-def render_exports(result: dict[str, Any], log_path: Any = None) -> None:
+def render_exports(result: dict[str, Any], logs: Any = None) -> None:
     st.markdown("#### 下载本次研究结果")
     st.caption("Markdown 汇总 Top 论文分析，CSV 保存去重并按评分排序的完整论文列表，日志用于运行排障。")
     markdown = markdown_report(result)
@@ -1375,12 +1321,11 @@ def render_exports(result: dict[str, Any], log_path: Any = None) -> None:
         mime="text/csv",
         use_container_width=True,
     )
-    resolved_log = Path(str(log_path)) if log_path else None
-    if resolved_log is not None and resolved_log.is_file():
+    if isinstance(logs, list) and logs:
         col3.download_button(
             "下载运行日志",
-            data=resolved_log.read_bytes(),
-            file_name=resolved_log.name,
+            data=("\n".join(str(line) for line in logs) + "\n").encode("utf-8"),
+            file_name="scholartrace_job.log",
             mime="text/plain",
             use_container_width=True,
         )
@@ -1404,11 +1349,40 @@ def render_empty_state() -> None:
     )
 
 
+def render_recent_jobs() -> None:
+    if not st.session_state.get("api_connected"):
+        return
+    try:
+        jobs = recent_workflows(10)
+    except WorkflowRunError:
+        return
+    if not jobs:
+        return
+    with st.sidebar.expander("最近任务"):
+        labels = [f"{item['status']} · {item['query'][:35]} · {item['job_id'][:8]}" for item in jobs]
+        choice = st.selectbox("选择已有任务", range(len(jobs)), format_func=lambda i: labels[i])
+        if st.button("恢复查看任务", use_container_width=True):
+            selected = jobs[choice]
+            if selected["status"] == "completed":
+                _store_completed_workflow(selected)
+                st.session_state.pop("active_workflow_job_id", None)
+            elif selected["status"] in {"queued", "running", "cancelling"}:
+                st.session_state["active_workflow_job_id"] = selected["job_id"]
+            else:
+                st.session_state["workflow_notice"] = {
+                    "level": "warning",
+                    "message": str(selected.get("error") or f"任务状态：{selected['status']}"),
+                    "logs": selected.get("logs"),
+                }
+            st.rerun()
+
+
 def main() -> None:
     apply_styles()
     render_header()
     workflow_was_active = bool(st.session_state.get("active_workflow_job_id"))
     options, run_clicked = render_controls()
+    render_recent_jobs()
     if run_clicked:
         if workflow_was_active:
             cancel_active_workflow()
@@ -1418,13 +1392,7 @@ def main() -> None:
     render_workflow_notice()
     result = st.session_state.get("result")
     if isinstance(result, dict):
-        render_result(
-            result,
-            deepseek_api_key=(
-                options.deepseek_api_key
-                or st.session_state.get("active_deepseek_api_key")
-            ),
-        )
+        render_result(result)
     else:
         render_empty_state()
 

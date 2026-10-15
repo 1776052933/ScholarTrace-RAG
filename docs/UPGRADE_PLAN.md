@@ -167,3 +167,8 @@ BM25、RRF 和 RAG 是检索方法或系统范式，并非必须单独安装的�
 M0 已实现固定 QASPER 全文问答与 LitSearch 固定语料 dense 评测入口，保存 manifest、逐题输出和耗时；QASPER dev 固定十题已完成基线，具体结果见 `evaluation/M0_BASELINE.md`。LitSearch 完整 64,183 篇索引尚未在当前 CPU 环境运行，32 篇仅用于流程验证。
 
 M1 已完成逐页 PDF 入库与结构化引用、BGE-M3 失败显式报错、索引模型指纹与维度保护、统一 RAG 配置和错误代码、LangChain Core 提示词模板、稳定论文 ID 的搜索到注册传递，以及业务工作流抽取至 `app/services/workflow.py`。旧 CLI 继续调用同一服务。旧 Chroma 集合需重新摄取到 `paper_chunks_m1`。M2 及之后的目标技术栈仍按上文计划实施。
+
+
+## M2 当前进度（2026-10-15）
+
+已实现 FastAPI 契约与任务/问答接口、MySQL/Alembic 数据模型与初始迁移、旧 SQLite 论文库备份导入、Docker Compose 基础服务和 Streamlit HTTP 客户端。API/UI 的真实界面与 API 重启验收已在独立 SQLite 数据库完成；MySQL 实例联调仍需 Docker/MySQL 运行环境，详见 [M2 运行与验收](M2_RUN_AND_ACCEPTANCE.md)。

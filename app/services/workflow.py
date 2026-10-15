@@ -33,6 +33,7 @@ from time import perf_counter
 from typing import Any, Dict, Optional
 
 from literature_database.database import DatabaseManager
+from app.config import ModelSettings
 from literature_database.service import LiteratureService
 from query_decomposition.pipeline import QueryDecompositionPipeline
 from query_decomposition.schema import SubQuery as DecompositionSubQuery
@@ -46,6 +47,10 @@ from search_agent.pipeline import SearchAgent
 
 
 logger = logging.getLogger("auto_paper")
+
+
+class WorkflowCancelled(RuntimeError):
+    """Raised when a persisted M2 job is cancelled between workflow stages."""
 
 
 class AutoPaperWorkflow:
@@ -71,6 +76,7 @@ class AutoPaperWorkflow:
         rag_workers: int = 3,
         citation_tracker: Optional[Any] = None,
         enable_citation_tracking: bool = True,
+        model_settings: Optional[ModelSettings] = None,
     ) -> None:
         if (
             isinstance(max_search_rounds, bool)
@@ -82,6 +88,45 @@ class AutoPaperWorkflow:
             raise ValueError("rag_workers must be a positive integer")
 
         _configure_project_api_keys()
+        if model_settings is not None and model_settings.api_key.get_secret_value():
+            provider = model_settings.client_kwargs()
+            if query_understanding is None and use_query_llm:
+                from query_understanding.llm_client import DeepSeekClient as UnderstandingClient
+                query_understanding = QueryUnderstandingPipeline(
+                    llm_client=UnderstandingClient(**provider, timeout_seconds=model_settings.timeout_seconds),
+                    use_llm=True,
+                    fallback_to_rules=True,
+                )
+            if query_decomposition is None and use_query_llm:
+                from query_decomposition.llm_client import DeepSeekClient as DecompositionClient
+                query_decomposition = QueryDecompositionPipeline(
+                    llm_client=DecompositionClient(**provider, timeout_seconds=model_settings.timeout_seconds),
+                    use_llm=True,
+                    fallback_to_rules=True,
+                )
+            if search_agent is None:
+                from search_agent.config import SearchAgentConfig
+                from search_agent.evaluator import SearchEvaluator
+                from search_agent.llm_client import DeepSeekClient as SearchClient
+                from search_agent.planner import SearchPlanner
+                from search_agent.reflector import SearchReflector
+                search_config = SearchAgentConfig.from_env()
+                search_client = SearchClient(**provider, timeout_seconds=model_settings.timeout_seconds)
+                search_agent = SearchAgent(
+                    config=search_config,
+                    max_round=max_search_rounds,
+                    planner=SearchPlanner(search_config, llm_client=search_client),
+                    evaluator=SearchEvaluator(search_config, llm_client=search_client),
+                    reflector=SearchReflector(llm_client=search_client, use_llm=search_config.use_llm),
+                )
+            if ranking_agent is None:
+                from ranking_agent.cache import EvaluationCache
+                from ranking_agent.evaluator import PaperEvaluator
+                from ranking_agent.llm_client import DeepSeekClient as RankingClient
+                ranking_agent = RankingAgent(evaluator=PaperEvaluator(
+                    llm_client=RankingClient(**provider, timeout=model_settings.timeout_seconds),
+                    cache=EvaluationCache(),
+                ))
         self.query_understanding = query_understanding or QueryUnderstandingPipeline(
             use_llm=use_query_llm,
             fallback_to_rules=True,
@@ -103,8 +148,17 @@ class AutoPaperWorkflow:
         self.rag_reader = rag_reader
         self.rag_workers = rag_workers
         if self.rag_reader is None and enable_rag:
+            from rag_reader.config import RAGSettings
+            rag_settings = RAGSettings.from_env()
+            if model_settings is not None:
+                rag_settings = rag_settings.model_copy(update={
+                    "llm_model": model_settings.model,
+                    "llm_base_url": model_settings.base_url,
+                    "llm_timeout_seconds": model_settings.timeout_seconds,
+                })
             self.rag_reader = RAGReader(
                 vector_store=VectorStore(persist_directory=chroma_directory),
+                settings=rag_settings,
             )
 
     def run(
@@ -123,6 +177,7 @@ class AutoPaperWorkflow:
         summarize: bool = False,
         extract_knowledge: bool = False,
         publication_date_to: Optional[str] = None,
+        should_cancel: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """执行完整工作流并返回可直接 JSON 序列化的结果。"""
         query = _required_text(query, "query")
@@ -138,6 +193,11 @@ class AutoPaperWorkflow:
                 "question, summarize and extract_knowledge require ingest_rag=True"
             )
 
+        def check_cancel() -> None:
+            if should_cancel is not None and should_cancel():
+                raise WorkflowCancelled("research job was cancelled")
+
+        check_cancel()
         started = perf_counter()
         stages: Dict[str, Any] = {}
 
@@ -147,6 +207,7 @@ class AutoPaperWorkflow:
             query,
         )
         stages["query_understanding"] = _stage(analysis, elapsed)
+        check_cancel()
 
         decomposition, elapsed = _timed(
             "query_decomposition",
@@ -155,6 +216,7 @@ class AutoPaperWorkflow:
         )
         decomposition = _merge_upstream_subqueries(decomposition, analysis)
         stages["query_decomposition"] = _stage(decomposition, elapsed)
+        check_cancel()
 
         search_input = _model_data(decomposition)
         if publication_date_to:
@@ -178,6 +240,7 @@ class AutoPaperWorkflow:
             stages["citation_tracking"] = _stage(citation_expansion.summary, elapsed)
 
         stages["search_agent"] = _stage(search_result, search_elapsed)
+        check_cancel()
 
         ranking_result, elapsed = _timed(
             "ranking_agent",
@@ -186,6 +249,7 @@ class AutoPaperWorkflow:
             search_result,
         )
         stages["ranking_agent"] = _stage(ranking_result, elapsed)
+        check_cancel()
 
         ranked_papers = list(_value(ranking_result, "papers") or [])
         selected_papers = ranked_papers[:max_papers]
@@ -202,7 +266,9 @@ class AutoPaperWorkflow:
         }
         ranking_payload = {"papers": [_model_data(paper) for paper in ranking_candidates]}
 
+        check_cancel()
         literature_started = perf_counter()
+        logger.info("开始阶段：literature_database")
         ingestion_results = []
         downloadable_resources = []
         if download_papers and ingest_rag:
@@ -297,7 +363,10 @@ class AutoPaperWorkflow:
             ),
         }
 
+        logger.info("完成阶段：literature_database，耗时 %.3f 秒", _elapsed(literature_started))
+        check_cancel()
         rag_started = perf_counter()
+        logger.info("开始阶段：rag_reader")
         rag_outputs = _run_rag_tasks(
             self.rag_reader,
             ingestion_results,
@@ -314,6 +383,8 @@ class AutoPaperWorkflow:
             "outputs": rag_outputs,
         }
 
+        logger.info("完成阶段：rag_reader，耗时 %.3f 秒", _elapsed(rag_started))
+        check_cancel()
         return {
             "status": "completed",
             "query": query,
