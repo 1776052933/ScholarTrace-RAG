@@ -13,6 +13,58 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
+  milvus_etcd:
+    image: quay.io/coreos/etcd:v3.5.25
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: etcd -advertise-client-urls=http://milvus_etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    volumes:
+      - milvus_etcd_data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+  milvus_minio:
+    image: milvusdb/minio:RELEASE.2024-12-18T13-15-44Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: minio server /minio_data --console-address ":9001"
+    volumes:
+      - milvus_minio_data:/minio_data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+  milvus:
+    image: milvusdb/milvus:v2.6.24
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: milvus_etcd:2379
+      MINIO_ADDRESS: milvus_minio:9000
+      MQ_TYPE: woodpecker
+    volumes:
+      - milvus_data:/var/lib/milvus
+    ports:
+      - "127.0.0.1:19530:19530"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+    depends_on:
+      milvus_etcd:
+        condition: service_healthy
+      milvus_minio:
+        condition: service_healthy
   api:
     build:
       context: .
@@ -20,6 +72,13 @@ services:
     environment:
       DATABASE_URL: mysql+pymysql://${MYSQL_USER:-scholartrace}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-scholartrace}?charset=utf8mb4
       AUTO_PAPER_DATA_ROOT: /app/data/m2
+      RAG_VECTOR_BACKEND: milvus
+      RAG_COLLECTION_NAME: ${RAG_COLLECTION_NAME:-paper_chunks_m3}
+      MILVUS_URI: http://milvus:19530
+      RAG_RETRIEVAL_MODE: ${RAG_RETRIEVAL_MODE:-hybrid}
+      RAG_CANDIDATE_K: ${RAG_CANDIDATE_K:-20}
+      RAG_RERANKER_ENABLED: ${RAG_RERANKER_ENABLED:-true}
+      RAG_PDF_PARSER_BACKEND: ${RAG_PDF_PARSER_BACKEND:-pymupdf}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
       OPENALEX_API_KEY: ${OPENALEX_API_KEY:-}
@@ -30,6 +89,8 @@ services:
       - "127.0.0.1:8000:8000"
     depends_on:
       mysql:
+        condition: service_healthy
+      milvus:
         condition: service_healthy
     command: ["sh", "-c", "python -m alembic -c alembic.ini upgrade head && python -m uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --workers 1"]
   ui:
@@ -45,3 +106,6 @@ services:
     command: ["python", "-m", "streamlit", "run", "Auto_Paper_UI/ui_app.py", "--server.address=0.0.0.0", "--server.port=8501"]
 volumes:
   mysql_data:
+  milvus_etcd_data:
+  milvus_minio_data:
+  milvus_data:

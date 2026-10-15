@@ -38,6 +38,15 @@ class TextCleaner:
         records: List[dict[str, Any]] = []
         paragraph_count = 0
         for page in pages:
+            if page["metadata"].get("parser") == "docling":
+                value = _remove_garbled_characters(page["text"]).strip()
+                if value:
+                    records.append({
+                        "page": page["page"], "text": value,
+                        "section": page["section"], "metadata": page["metadata"],
+                    })
+                    paragraph_count += 1
+                continue
             lines = page["text"].replace("\r\n", "\n").replace("\r", "\n").split("\n")
             lines = self._remove_margins(lines, removable)
             text = _replace_formulas(_remove_garbled_characters("\n".join(lines)))
@@ -52,7 +61,10 @@ class TextCleaner:
                 seen.add(key)
                 kept.append(value)
             if kept:
-                records.append({"page": page["page"], "text": "\n\n".join(kept)})
+                records.append({
+                    "page": page["page"], "text": "\n\n".join(kept),
+                    "section": page["section"], "metadata": page["metadata"],
+                })
                 paragraph_count += len(kept)
         logger.info(
             "论文文本清洗完成：pages=%d, paragraphs=%d, characters=%d",
@@ -99,7 +111,11 @@ def _validate_pages(raw_pages: Sequence[Mapping[str, Any]]) -> List[dict[str, An
         text = page["text"]
         if not isinstance(text, str):
             raise TypeError(f"raw_pages[{index}].text must be a string")
-        result.append({"page": page.get("page", index + 1), "text": text})
+        result.append({
+            "page": page.get("page", index + 1), "text": text,
+            "section": str(page.get("section") or ""),
+            "metadata": dict(page.get("metadata") or {}),
+        })
     return result
 
 

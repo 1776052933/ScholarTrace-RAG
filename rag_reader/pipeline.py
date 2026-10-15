@@ -21,6 +21,8 @@ from .schema import DocumentChunk, PaperDocument, PaperKnowledge, RAGAnswer
 from .splitter import DocumentSplitter
 from .summarizer import PaperSummarizer
 from .vector_store import VectorStore
+from .store_factory import create_vector_store
+from .reranker import CrossEncoderReranker
 
 
 logger = logging.getLogger(__name__)
@@ -56,7 +58,13 @@ class RAGReader:
     ) -> None:
         self.settings = settings or RAGSettings.from_env()
         self.document_loader = document_loader or DocumentLoader()
-        self.pdf_parser = pdf_parser or PDFParser()
+        if pdf_parser is not None:
+            self.pdf_parser = pdf_parser
+        elif self.settings.pdf_parser_backend == "docling":
+            from .docling_parser import DoclingPDFParser
+            self.pdf_parser = DoclingPDFParser()
+        else:
+            self.pdf_parser = PDFParser()
         self.cleaner = cleaner or TextCleaner()
         self.splitter = splitter or DocumentSplitter(
             chunk_size=self.settings.chunk_size,
@@ -67,13 +75,21 @@ class RAGReader:
             device=self.settings.embedding_device,
             batch_size=self.settings.embedding_batch_size,
         )
-        self.vector_store = vector_store or VectorStore(
-            collection_name=self.settings.collection_name,
-        )
+        self.vector_store = vector_store or create_vector_store(self.settings)
         self.retriever = retriever or PaperRetriever(
             embedding_model=self.embedding_model,
             vector_store=self.vector_store,
             default_top_k=self.settings.retrieval_top_k,
+            retrieval_mode=(
+                self.settings.retrieval_mode
+                if getattr(self.vector_store, "supports_hybrid", False)
+                else "dense"
+            ),
+            candidate_k=self.settings.retrieval_candidate_k,
+            reranker=(
+                CrossEncoderReranker(self.settings.reranker_model)
+                if self.settings.reranker_enabled else None
+            ),
         )
         shared_client = llm_client or LazyDeepSeekClient(self.settings)
         self.extractor = extractor or PaperKnowledgeExtractor(llm_client=shared_client)
@@ -123,6 +139,10 @@ class RAGReader:
                 f"vector store wrote {stored} of {len(chunks)} chunks: "
                 f"{document.paper_id}"
             )
+
+        if hasattr(self.vector_store, "verify_documents"):
+            if not self.vector_store.verify_documents(chunks):
+                raise RuntimeError(f"indexed chunks are not readable: {document.paper_id}")
 
         with self._lock:
             self._documents[document.paper_id] = document.model_copy(deep=True)

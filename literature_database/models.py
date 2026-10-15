@@ -39,6 +39,7 @@ class PaperModel(Base):
         default="PENDING",
         index=True,
     )
+    index_signature: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     files: Mapped[List["PaperFileModel"]] = relationship(
         back_populates="paper",

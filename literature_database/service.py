@@ -179,7 +179,10 @@ class LiteratureService:
                 document = get_document(paper_id)
                 text_path = (output_dir / _text_filename(paper_id)).resolve()
                 text_path.write_text(document.content, encoding="utf-8")
-                status = self._record_reader_output(paper_id, text_path)
+                status = self._record_reader_output(
+                    paper_id, text_path,
+                    index_signature=getattr(getattr(reader, "vector_store", None), "index_signature", None),
+                )
                 results.append({
                     "paper_id": paper_id,
                     "success": True,
@@ -189,6 +192,8 @@ class LiteratureService:
                     "error": None,
                 })
             except Exception as exc:
+                if getattr(getattr(reader, "vector_store", None), "index_scope", None):
+                    self._mark_index_invalid(paper_id, "FAILED")
                 results.append({
                     "paper_id": paper_id,
                     "success": False,
@@ -227,7 +232,10 @@ class LiteratureService:
             for item in self.last_download_results:
                 if item.get("success") or not item.get("paper_id"):
                     continue
-                remove_paper(str(item["paper_id"]))
+                removed_id = str(item["paper_id"])
+                remove_paper(removed_id)
+                if getattr(getattr(reader, "vector_store", None), "index_scope", None):
+                    self._mark_index_invalid(removed_id, "PENDING")
         return self.ingest_into_reader(
             resources,
             reader,
@@ -279,10 +287,19 @@ class LiteratureService:
                 ))
         return resources
 
+    def _mark_index_invalid(self, paper_id: str, status: str) -> None:
+        with self.database.get_session() as session:
+            model = session.get(PaperModel, paper_id)
+            if model is not None:
+                model.embedding_status = status
+                model.index_signature = None
+                session.commit()
+
     def _record_reader_output(
         self,
         paper_id: str,
         text_path: Path,
+        index_signature: str | None = None,
     ) -> PaperAvailability:
         with self.database.get_session() as session:
             model = session.get(PaperModel, paper_id)
@@ -309,6 +326,7 @@ class LiteratureService:
             else:
                 existing.status = "PARSED"
             model.embedding_status = "COMPLETED"
+            model.index_signature = index_signature
             status = AvailabilityChecker(session).check(paper_id)
             model.availability = status.value
             session.commit()

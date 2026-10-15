@@ -1,4 +1,4 @@
-"""Rebuild Chroma for paper PDFs imported from the M1 SQLite database."""
+"""Rebuild the selected RAG index for papers imported from M1 SQLite."""
 from __future__ import annotations
 
 import argparse
@@ -12,16 +12,37 @@ from literature_database.models import PaperFileModel, PaperModel
 from literature_database.schema import PaperAvailability, PaperMetadata, PaperResource
 from rag_reader.pipeline import RAGReader
 from rag_reader.vector_store import VectorStore
+from rag_reader.config import RAGSettings
+from rag_reader.store_factory import create_vector_store
 
 
 _PDF_READY = {"available", "completed", "downloaded", "success"}
 _TEXT_READY = {"available", "completed", "parsed", "success"}
 
 
-def rebuild(database_url: str, data_root: Path, paper_id: str | None = None) -> dict[str, int]:
+def rebuild(database_url: str, data_root: Path, paper_id: str | None = None, backend: str | None = None) -> dict[str, int]:
     data_root = Path(data_root).resolve()
     database = DatabaseManager(database_url)
-    reader = RAGReader(vector_store=VectorStore(persist_directory=str(data_root / "chroma")))
+    settings = RAGSettings.from_env()
+    selected = backend or settings.vector_backend
+    if selected == "milvus":
+        settings = settings.model_copy(update={
+            "vector_backend": "milvus",
+            "collection_name": (
+                settings.collection_name if os.getenv("RAG_COLLECTION_NAME")
+                else "paper_chunks_m3"
+            ),
+        })
+        store = create_vector_store(settings, chroma_directory=str(data_root / "chroma"))
+    elif selected == "chroma":
+        store = VectorStore(persist_directory=str(data_root / "chroma"))
+    else:
+        raise ValueError("backend must be chroma or milvus")
+    reader = (
+        RAGReader(vector_store=store, settings=settings)
+        if selected == "milvus"
+        else RAGReader(vector_store=store)
+    )
     success = failed = 0
     try:
         with database.get_session() as session:
@@ -65,6 +86,7 @@ def rebuild(database_url: str, data_root: Path, paper_id: str | None = None) -> 
                 with database.get_session() as session:
                     row = session.get(PaperModel, pid)
                     row.embedding_status = "FAILED"
+                    row.index_signature = None
                     session.commit()
             else:
                 success += 1
@@ -72,6 +94,7 @@ def rebuild(database_url: str, data_root: Path, paper_id: str | None = None) -> 
                 with database.get_session() as session:
                     row = session.get(PaperModel, pid)
                     row.embedding_status = "COMPLETED"
+                    row.index_signature = getattr(getattr(reader, "vector_store", None), "index_signature", None)
                     session.commit()
     finally:
         database.dispose()
@@ -83,10 +106,11 @@ def main() -> None:
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL"))
     parser.add_argument("--data-root", type=Path, default=Path(os.getenv("AUTO_PAPER_DATA_ROOT", "data/m2")))
     parser.add_argument("--paper-id")
+    parser.add_argument("--backend", choices=["chroma", "milvus"])
     args = parser.parse_args()
     if not args.database_url:
         parser.error("set DATABASE_URL or pass --database-url")
-    result = rebuild(args.database_url, args.data_root, args.paper_id)
+    result = rebuild(args.database_url, args.data_root, args.paper_id, args.backend)
     print(result)
     if result["failed"]:
         raise SystemExit(1)

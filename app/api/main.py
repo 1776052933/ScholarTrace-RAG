@@ -12,7 +12,9 @@ from sqlalchemy import select, text
 from app.api.schemas import JobListItem, JobSnapshot, PaperSummary, QuestionRequest, QuestionResponse, ResearchOptions
 from app.config import ModelSettings
 from app.services.jobs import JobBusyError, ResearchJobRunner
-from app.services.questions import QuestionService
+from app.services.questions import QuestionService, PaperIndexUnavailableError
+from rag_reader.config import RAGSettings
+from rag_reader.store_factory import milvus_index_scope
 from literature_database.database import DatabaseManager
 from literature_database.models import PaperModel
 import app.storage.models  # noqa: F401 - register M2 ORM tables
@@ -95,6 +97,8 @@ def create_app(
     def list_papers(limit: int = 100) -> list[PaperSummary]:
         if not 1 <= limit <= 500:
             raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
+        settings = RAGSettings.from_env()
+        scope = milvus_index_scope(settings) + ":" if settings.vector_backend == "milvus" else None
         with database.get_session() as session:
             rows = session.scalars(select(PaperModel).order_by(PaperModel.rank_score.desc()).limit(limit)).all()
             return [PaperSummary(
@@ -103,7 +107,12 @@ def create_app(
                 authors=row.authors or [],
                 year=row.year,
                 availability=row.availability,
-                embedding_status=row.embedding_status,
+                embedding_status=(
+                    "REINDEX_REQUIRED"
+                    if scope and row.embedding_status.casefold() == "completed"
+                    and not (row.index_signature or "").startswith(scope)
+                    else row.embedding_status
+                ),
             ) for row in rows]
 
     @app.post("/api/v1/questions", response_model=QuestionResponse)
@@ -112,6 +121,8 @@ def create_app(
             answer_id, answer = questions.ask(request.paper_id, request.question)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="paper not found") from exc
+        except PaperIndexUnavailableError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return QuestionResponse(answer_id=answer_id, paper_id=request.paper_id, answer=answer)
 
     @app.get("/api/v1/answers/{answer_id}/evidence", response_model=list[dict[str, Any]])

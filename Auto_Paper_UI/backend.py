@@ -108,7 +108,7 @@ def ask_paper_question(
     from rag_reader.config import RAGSettings
     from rag_reader.llm_client import DeepSeekClient
     from rag_reader.pipeline import RAGReader
-    from rag_reader.vector_store import VectorStore
+    from rag_reader.store_factory import create_vector_store
 
     settings = RAGSettings.from_env()
     llm_client = DeepSeekClient(
@@ -118,8 +118,8 @@ def ask_paper_question(
         timeout=settings.llm_timeout_seconds,
     )
     reader = RAGReader(
-        vector_store=VectorStore(
-            persist_directory=str(RUNTIME_ROOT / "chroma"),
+        vector_store=create_vector_store(
+            settings, chroma_directory=str(RUNTIME_ROOT / "chroma"),
         ),
         llm_client=llm_client,
         settings=settings,

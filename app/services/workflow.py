@@ -40,7 +40,7 @@ from query_decomposition.schema import SubQuery as DecompositionSubQuery
 from query_understanding.pipeline import QueryUnderstandingPipeline
 from rag_reader.errors import error_info
 from rag_reader.pipeline import RAGReader
-from rag_reader.vector_store import VectorStore
+from rag_reader.store_factory import create_vector_store
 from ranking_agent.pipeline import RankingAgent
 from search_agent.citation_tracker import CitationTracker
 from search_agent.pipeline import SearchAgent
@@ -157,7 +157,7 @@ class AutoPaperWorkflow:
                     "llm_timeout_seconds": model_settings.timeout_seconds,
                 })
             self.rag_reader = RAGReader(
-                vector_store=VectorStore(persist_directory=chroma_directory),
+                vector_store=create_vector_store(rag_settings, chroma_directory=chroma_directory),
                 settings=rag_settings,
             )
 

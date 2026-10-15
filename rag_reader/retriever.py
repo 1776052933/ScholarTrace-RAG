@@ -1,4 +1,5 @@
-"""根据用户问题检索单篇或多篇论文的相关文本片段。"""
+"""Retrieve paper passages with optional Milvus hybrid search and cross-encoder."""
+from __future__ import annotations
 
 from typing import Any, Iterable, List, Mapping, Optional
 
@@ -8,108 +9,107 @@ from .vector_store import VectorStore
 
 
 class PaperRetriever:
-    """组合查询向量模型和 Chroma VectorStore 的论文检索器。"""
-
     def __init__(
         self,
         embedding_model: Optional[EmbeddingModel] = None,
         vector_store: Optional[VectorStore] = None,
         *,
         default_top_k: int = 5,
+        retrieval_mode: str = "dense",
+        candidate_k: int = 20,
+        reranker: Any = None,
     ) -> None:
         if isinstance(default_top_k, bool) or not isinstance(default_top_k, int) or default_top_k <= 0:
             raise ValueError("default_top_k must be a positive integer")
+        if isinstance(candidate_k, bool) or not isinstance(candidate_k, int) or candidate_k <= 0:
+            raise ValueError("candidate_k must be a positive integer")
+        if retrieval_mode not in {"dense", "bm25", "hybrid"}:
+            raise ValueError("invalid retrieval mode")
         self.embedding_model = embedding_model or EmbeddingModel()
         self.vector_store = vector_store or VectorStore()
         self.default_top_k = default_top_k
+        self.retrieval_mode = retrieval_mode
+        self.candidate_k = candidate_k
+        self.reranker = reranker
+
+    def _search(
+        self, question: str, vector: list[float] | None, *, top_k: int,
+        paper_id: str | None = None, paper_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        candidate_limit = max(top_k, self.candidate_k) if self.reranker else top_k
+        if getattr(self.vector_store, "supports_hybrid", False):
+            return self.vector_store.search(
+                vector, top_k=candidate_limit, paper_id=paper_id,
+                paper_ids=paper_ids, query_text=question,
+                mode=self.retrieval_mode, candidate_k=max(candidate_limit, self.candidate_k),
+            )
+        if paper_ids is not None:
+            merged = []
+            for item in paper_ids:
+                merged.extend(self.vector_store.search(vector, top_k=candidate_limit, paper_id=item))
+            merged.sort(key=lambda row: float(row.get("score") or 0.0), reverse=True)
+            seen = set()
+            unique = []
+            for row in merged:
+                chunk_id = row.get("chunk_id")
+                if chunk_id and chunk_id not in seen:
+                    seen.add(chunk_id)
+                    unique.append(row)
+                if len(unique) >= candidate_limit:
+                    break
+            return unique
+        return self.vector_store.search(vector, top_k=candidate_limit, paper_id=paper_id)
+
+    def _retrieve(
+        self, question: str, limit: int, *,
+        paper_id: str | None = None, paper_ids: list[str] | None = None,
+    ) -> list[DocumentChunk]:
+        if getattr(self.vector_store, "supports_hybrid", False) and self.retrieval_mode == "bm25":
+            self.vector_store.prepare_bm25()
+            vector = None
+        else:
+            vector = self.embedding_model.embed(question)
+            if hasattr(self.vector_store, "ensure_embedding_compatible"):
+                self.vector_store.ensure_embedding_compatible(
+                    embedding_fingerprint(self.embedding_model), len(vector)
+                )
+        results = self._search(question, vector, top_k=limit, paper_id=paper_id, paper_ids=paper_ids)
+        if self.reranker is not None:
+            results = self.reranker.rerank(question, results, top_k=limit)
+        return _chunks(results[:limit], fallback_paper_id=paper_id)
 
     def retrieve(
-        self,
-        paper_id: Optional[str],
-        question: str,
-        *,
-        top_k: Optional[int] = None,
+        self, paper_id: Optional[str], question: str, *, top_k: Optional[int] = None
     ) -> List[DocumentChunk]:
-        """检索单篇论文；paper_id 为 ``None`` 时检索全部论文。"""
         question = _question(question)
         limit = _top_k(top_k, self.default_top_k)
         if paper_id is not None:
             paper_id = paper_id.strip()
             if not paper_id:
                 raise ValueError("paper_id must not be empty")
-        query_vector = self.embedding_model.embed(question)
-        if hasattr(self.vector_store, "ensure_embedding_compatible"):
-            self.vector_store.ensure_embedding_compatible(
-                embedding_fingerprint(self.embedding_model), len(query_vector)
-            )
-        results = self.vector_store.search(
-            query_vector,
-            top_k=limit,
-            paper_id=paper_id,
-        )
-        return _chunks(results, fallback_paper_id=paper_id)
+        return self._retrieve(question, limit, paper_id=paper_id)
 
     def retrieve_multiple(
-        self,
-        paper_ids: Iterable[str],
-        question: str,
-        *,
-        top_k: Optional[int] = None,
+        self, paper_ids: Iterable[str], question: str, *, top_k: Optional[int] = None
     ) -> List[DocumentChunk]:
-        """检索指定的多篇论文，并对结果进行全局 Top-K 排序。"""
         question = _question(question)
         limit = _top_k(top_k, self.default_top_k)
         ids = _paper_ids(paper_ids)
         if not ids:
             return []
-        query_vector = self.embedding_model.embed(question)
-        if hasattr(self.vector_store, "ensure_embedding_compatible"):
-            self.vector_store.ensure_embedding_compatible(
-                embedding_fingerprint(self.embedding_model), len(query_vector)
-            )
-        merged = []
-        for paper_id in ids:
-            merged.extend(self.vector_store.search(
-                query_vector,
-                top_k=limit,
-                paper_id=paper_id,
-            ))
-        merged.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
+        return self._retrieve(question, limit, paper_ids=ids)
 
-        unique, seen = [], set()
-        for item in merged:
-            chunk_id = str(item.get("chunk_id") or "")
-            if chunk_id and chunk_id not in seen:
-                unique.append(item)
-                seen.add(chunk_id)
-            if len(unique) >= limit:
-                break
-        return _chunks(unique)
-
-    def retrieve_all(
-        self,
-        question: str,
-        *,
-        top_k: Optional[int] = None,
-    ) -> List[DocumentChunk]:
-        """跨向量库中的全部论文检索。"""
+    def retrieve_all(self, question: str, *, top_k: Optional[int] = None) -> List[DocumentChunk]:
         return self.retrieve(None, question, top_k=top_k)
 
     def search(
-        self,
-        question: str,
-        *,
-        paper_id: Optional[str] = None,
-        top_k: Optional[int] = None,
+        self, question: str, *, paper_id: Optional[str] = None, top_k: Optional[int] = None
     ) -> List[DocumentChunk]:
-        """以 question 为首参数的兼容接口。"""
         return self.retrieve(paper_id, question, top_k=top_k)
 
 
 def _chunks(
-    results: Iterable[Mapping[str, Any]],
-    *,
-    fallback_paper_id: Optional[str] = None,
+    results: Iterable[Mapping[str, Any]], *, fallback_paper_id: Optional[str] = None
 ) -> List[DocumentChunk]:
     chunks = []
     for result in results:
@@ -125,12 +125,8 @@ def _chunks(
         metadata["retrieval_score"] = float(result.get("score") or 0.0)
         metadata["distance"] = float(result.get("distance") or 0.0)
         chunks.append(DocumentChunk(
-            chunk_id=chunk_id,
-            paper_id=paper_id,
-            text=text,
-            page=page,
-            section=section,
-            metadata=metadata,
+            chunk_id=chunk_id, paper_id=paper_id, text=text,
+            page=page, section=section, metadata=metadata,
         ))
     return chunks
 
