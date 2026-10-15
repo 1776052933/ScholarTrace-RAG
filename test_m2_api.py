@@ -119,3 +119,77 @@ def test_api_cooperative_cancel_and_question_contract(tmp_path, monkeypatch):
         assert answer.json()["answer"]["answer"] == "6 layers"
         evidence = client.get("/api/v1/answers/answer-1/evidence")
         assert evidence.json()[0]["page"] == 3
+
+
+def test_api_reports_partial_and_failed_paper_processing(tmp_path, monkeypatch):
+    class PaperWorkflow:
+        def run(self, query, **kwargs):
+            if query == "missing stage":
+                return {"status": "completed", "query": query, "stages": {}}
+            cases = {
+                "all good": ([True, True], [True, True]),
+                "some failed": ([True, True], [True, False]),
+                "download failed": ([True, False], [True]),
+                "all failed": ([True], [False]),
+                "nothing found": ([], []),
+                "download only failed": ([False], []),
+                "metadata only": ([], []),
+            }
+            downloads, ingestions = cases[query]
+            return {
+                "status": "completed",
+                "query": query,
+                "stages": {"literature_database": {
+                    "download_results": [
+                        {"paper_id": f"paper-{index}", "success": success, "error": None if success else "PDF missing"}
+                        for index, success in enumerate(downloads)
+                    ],
+                    "ingestion_results": [
+                        {"paper_id": f"paper-{index}", "success": success, "error": None if success else "index error"}
+                        for index, success in enumerate(ingestions)
+                    ],
+                }},
+            }
+
+    url = migrated_database(tmp_path, monkeypatch)
+    app = create_app(database_url=url, data_root=tmp_path / "assets", workflow_factory=lambda _: PaperWorkflow())
+    expected = {
+        "all good": "completed",
+        "some failed": "partial_success",
+        "download failed": "partial_success",
+        "all failed": "failed",
+        "nothing found": "failed",
+        "download only failed": "failed",
+        "metadata only": "completed",
+        "missing stage": "failed",
+    }
+    ids = {}
+    with TestClient(app) as client:
+        for query, status in expected.items():
+            response = client.post("/api/v1/jobs", json={
+                "query": query, "max_papers": 2,
+                "download_papers": query != "metadata only",
+                "enable_rag": query not in {"metadata only", "download only failed"},
+                "summarize": False, "extract_knowledge": False,
+            })
+            assert response.status_code == 202, response.text
+            job_id = response.json()["job_id"]
+            ids[query] = job_id
+            app.state.runner.join(job_id, timeout=5)
+            snapshot = client.get(f"/api/v1/jobs/{job_id}").json()
+            assert snapshot["status"] == status
+            assert snapshot["result"]["status"] == status
+            if query != "missing stage":
+                assert "ingestion_results" in snapshot["result"]["stages"]["literature_database"]
+            assert snapshot["retryable"] is (status != "completed")
+            assert bool(snapshot["error"]) is (status != "completed")
+        listed = {item["job_id"]: item for item in client.get("/api/v1/jobs").json()}
+        assert listed[ids["some failed"]]["status"] == "partial_success"
+        assert listed[ids["all failed"]]["status"] == "failed"
+
+    restarted = create_app(database_url=url, data_root=tmp_path / "assets", workflow_factory=lambda _: PaperWorkflow())
+    with TestClient(restarted) as client:
+        assert client.get(f"/api/v1/jobs/{ids['some failed']}").json()["status"] == "partial_success"
+        failed = client.get(f"/api/v1/jobs/{ids['all failed']}").json()
+        assert failed["status"] == "failed"
+        assert failed["result"]["stages"]["literature_database"]["ingestion_results"][0]["error"] == "index error"

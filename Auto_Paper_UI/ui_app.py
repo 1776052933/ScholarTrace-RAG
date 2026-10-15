@@ -57,6 +57,17 @@ STAGE_LABELS = {
     "rag_reader": "RAG 智能阅读",
 }
 
+JOB_STATUS_LABELS = {
+    "queued": "排队中",
+    "running": "运行中",
+    "cancelling": "取消中",
+    "completed": "已完成",
+    "partial_success": "部分完成",
+    "failed": "失败",
+    "cancelled": "已取消",
+    "interrupted": "已中断",
+}
+
 STAGE_PROGRESS = {
     "query_understanding": 10,
     "query_decomposition": 22,
@@ -309,10 +320,8 @@ def cancel_active_workflow() -> None:
     except WorkflowRunError as exc:
         st.session_state["workflow_notice"] = {"level": "error", "message": f"取消检索失败：{exc}"}
     else:
-        if snapshot.get("status") == "completed":
-            _store_completed_workflow(snapshot)
-            st.session_state.pop("active_workflow_job_id", None)
-        elif snapshot.get("status") in {"cancelled", "failed", "interrupted"}:
+        if snapshot.get("status") in {"completed", "partial_success", "cancelled", "failed", "interrupted"}:
+            _record_finished_workflow(snapshot)
             st.session_state.pop("active_workflow_job_id", None)
         else:
             st.session_state["workflow_notice"] = {
@@ -322,9 +331,34 @@ def cancel_active_workflow() -> None:
     st.rerun()
 
 
-def _store_completed_workflow(snapshot: dict[str, Any]) -> None:
+def _store_workflow_result(snapshot: dict[str, Any]) -> None:
     st.session_state["result"] = snapshot.get("result")
     st.session_state["logs"] = list(snapshot.get("logs") or [])
+
+
+def _record_finished_workflow(snapshot: dict[str, Any]) -> None:
+    status = snapshot.get("status")
+    if isinstance(snapshot.get("result"), dict):
+        _store_workflow_result(snapshot)
+    else:
+        st.session_state.pop("result", None)
+        st.session_state["logs"] = list(snapshot.get("logs") or [])
+    if status == "completed":
+        st.session_state["workflow_notice"] = {"level": "success", "message": "检索与处理已完成。"}
+    elif status == "partial_success":
+        st.session_state["workflow_notice"] = {
+            "level": "warning", "message": str(snapshot.get("error") or "部分论文处理失败，请查看处理明细。"),
+            "logs": snapshot.get("logs"),
+        }
+    elif status == "cancelled":
+        st.session_state["workflow_notice"] = {
+            "level": "warning", "message": "本次检索已取消，已完成的论文资源保留。", "logs": snapshot.get("logs"),
+        }
+    else:
+        st.session_state["workflow_notice"] = {
+            "level": "error" if status == "failed" else "warning",
+            "message": str(snapshot.get("error") or "检索运行失败。"), "logs": snapshot.get("logs"),
+        }
 
 
 @st.fragment(run_every=1.0)
@@ -351,13 +385,7 @@ def render_active_workflow() -> None:
         return
 
     st.session_state.pop("active_workflow_job_id", None)
-    if status == "completed":
-        _store_completed_workflow(snapshot)
-        st.session_state["workflow_notice"] = {"level": "success", "message": "检索与处理已完成。"}
-    elif status == "cancelled":
-        st.session_state["workflow_notice"] = {"level": "warning", "message": "本次检索已取消，已完成的论文资源保留。", "logs": snapshot.get("logs")}
-    else:
-        st.session_state["workflow_notice"] = {"level": "error", "message": str(snapshot.get("error") or "检索运行失败。"), "logs": snapshot.get("logs")}
+    _record_finished_workflow(snapshot)
     st.rerun()
 
 
@@ -1359,7 +1387,7 @@ def render_recent_jobs() -> None:
     if not jobs:
         return
     with st.sidebar.expander("最近任务"):
-        labels = [f"{item['status']} · {item['query'][:35]} · {item['job_id'][:8]}" for item in jobs]
+        labels = [f"{JOB_STATUS_LABELS.get(item['status'], item['status'])} · {item['query'][:35]} · {item['job_id'][:8]}" for item in jobs]
         choice = st.selectbox("选择已有任务", range(len(jobs)), format_func=lambda i: labels[i])
         if st.button("恢复查看任务", use_container_width=True):
             try:
@@ -1367,17 +1395,11 @@ def render_recent_jobs() -> None:
             except WorkflowRunError as exc:
                 st.error(str(exc))
                 return
-            if selected["status"] == "completed":
-                _store_completed_workflow(selected)
-                st.session_state.pop("active_workflow_job_id", None)
-            elif selected["status"] in {"queued", "running", "cancelling"}:
+            if selected["status"] in {"queued", "running", "cancelling"}:
                 st.session_state["active_workflow_job_id"] = selected["job_id"]
             else:
-                st.session_state["workflow_notice"] = {
-                    "level": "warning",
-                    "message": str(selected.get("error") or f"任务状态：{selected['status']}"),
-                    "logs": selected.get("logs"),
-                }
+                st.session_state.pop("active_workflow_job_id", None)
+                _record_finished_workflow(selected)
             st.rerun()
 
 

@@ -1,6 +1,7 @@
 """Durable M2 job execution around the existing domain workflow."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 import logging
 import re
@@ -31,6 +32,45 @@ _SECRET_PATTERN = re.compile(r"(?i)(\b(?:api[_-]?key|token|secret)\s*[=:]\s*)[^\
 
 def _safe_message(value: str) -> str:
     return _SECRET_PATTERN.sub(lambda match: (match.group(1) or "") + "[REDACTED]", str(value))
+
+
+def _paper_processing_outcome(result: dict[str, Any], options: ResearchOptions) -> tuple[str, str | None]:
+    """Derive the job outcome from per-paper work, preserving the full result."""
+    if not options.download_papers:
+        return "completed", None
+    stages = result.get("stages") or {}
+    literature = stages.get("literature_database") if isinstance(stages, Mapping) else None
+    if not isinstance(literature, Mapping):
+        return "failed", "工作流没有返回文献处理结果。"
+    downloads = [
+        item for item in literature.get("download_results") or []
+        if isinstance(item, Mapping)
+    ]
+    ingestions = [
+        item for item in literature.get("ingestion_results") or []
+        if isinstance(item, Mapping)
+    ]
+    failed_downloads = sum(item.get("success") is False for item in downloads)
+    failed_ingestions = sum(item.get("success") is False for item in ingestions)
+    usable = (
+        sum(bool(item.get("success")) for item in ingestions if item.get("paper_id"))
+        if options.enable_rag
+        else sum(bool(item.get("success")) for item in downloads)
+    )
+    if usable == 0:
+        target = "RAG 问答" if options.enable_rag else "阅读"
+        detail = (
+            f"下载失败 {failed_downloads} 篇，入库失败 {failed_ingestions} 篇"
+            if downloads or ingestions else "没有可处理的检索结果"
+        )
+        return "failed", f"未获得可用于{target}的论文（{detail}）。"
+    if failed_downloads or failed_ingestions:
+        return (
+            "partial_success",
+            f"已有 {usable} 篇论文可用；下载失败 {failed_downloads} 篇，"
+            f"入库失败 {failed_ingestions} 篇。请查看论文处理明细。",
+        )
+    return "completed", None
 
 
 class JobBusyError(RuntimeError):
@@ -284,7 +324,14 @@ class ResearchJobRunner:
             )
             if event.is_set():
                 raise WorkflowCancelled("用户已取消本次检索。")
-            self.store.update(job_id, status="completed", stage="completed", progress=100, result=result, finished_at=utc_now())
+            status, message = _paper_processing_outcome(result, options)
+            result = {**result, "status": status}
+            if message:
+                logger.warning("论文处理结果：%s", message)
+            self.store.update(
+                job_id, status=status, stage=status, progress=100, result=result,
+                error=message, retryable=status != "completed", finished_at=utc_now(),
+            )
         except WorkflowCancelled:
             self.store.update(job_id, status="cancelled", stage="cancelled", error=None, retryable=True, finished_at=utc_now())
         except Exception as exc:

@@ -15,7 +15,7 @@ M2 保留现有 `AutoPaperWorkflow`、BGE-M3、PyMuPDF 和 Chroma。Streamlit �
 | `POST /api/v1/questions` | 对已入库论文追问 | 回答与 `answer_id` |
 | `GET /api/v1/answers/{answer_id}/evidence` | 取持久化引用 | 结构化证据 |
 
-任务状态为 `queued → running → completed/failed`，取消时为 `running → cancelling → cancelled`。启动时将旧的 `queued/running/cancelling` 标记为 `interrupted`。阶段、进度与有限条日志在数据库中更新，原始密钥不进入请求、日志和任务表。
+任务状态为 `queued → running → completed/partial_success/failed`：下载与入库全部成功为 `completed`；有可用论文但存在单篇失败为 `partial_success`；没有可用论文为 `failed`。后两者仍保存完整处理结果、失败原因并标记为可重试；取消时为 `running → cancelling → cancelled`。启动时将旧的 `queued/running/cancelling` 标记为 `interrupted`。阶段、进度与有限条日志在数据库中更新，原始密钥不进入请求、日志和任务表。
 
 ## 表结构
 

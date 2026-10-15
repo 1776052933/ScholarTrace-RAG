@@ -174,11 +174,23 @@ def papers_csv_bytes(papers: Iterable[dict[str, Any]]) -> bytes:
 def markdown_report(result: dict[str, Any]) -> str:
     papers = selected_papers(result)
     outputs = rag_outputs(result)
+    status = {
+        "completed": "全部完成",
+        "partial_success": "部分完成",
+        "failed": "失败",
+    }.get(str(result.get("status") or ""), str(result.get("status") or ""))
+    literature = result.get("stages", {}).get("literature_database", {})
+    failed_steps = [
+        (label, item)
+        for label, key in (("下载", "download_results"), ("入库", "ingestion_results"))
+        for item in literature.get(key, []) or []
+        if isinstance(item, dict) and item.get("success") is False
+    ]
     lines = [
         "# AutoPaper 科研分析报告",
         "",
         f"- 研究主题：{result.get('query', '')}",
-        f"- 运行状态：{result.get('status', '')}",
+        f"- 运行状态：{status}",
         f"- 总耗时：{_duration(result.get('elapsed_seconds', 0))}",
         f"- 入选论文：{len(papers)} 篇",
         "",
@@ -236,6 +248,13 @@ def markdown_report(result: dict[str, Any]) -> str:
                     interactive_answer,
                     heading=f"交互问答 {answer_index}",
                 )
+
+    if failed_steps:
+        lines.extend(["", "## 论文处理异常", ""])
+        for label, item in failed_steps:
+            paper = item.get("title") or item.get("paper_id") or "未命名论文"
+            reason = str(item.get("error") or "处理失败").replace("\n", " ")
+            lines.append(f"- {label}失败：{paper}；原因：{reason}")
 
     lines.extend(["", "## 阶段耗时", ""])
     for stage, seconds in stage_times(result):

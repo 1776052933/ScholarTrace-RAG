@@ -45,7 +45,7 @@ class ResearchOptions(BaseModel):
         return self
 
 
-JobStatus = Literal["queued", "running", "cancelling", "completed", "failed", "cancelled", "interrupted"]
+JobStatus = Literal["queued", "running", "cancelling", "completed", "partial_success", "failed", "cancelled", "interrupted"]
 
 
 class JobSnapshot(BaseModel):
