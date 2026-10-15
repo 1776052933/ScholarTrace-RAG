@@ -1,0 +1,7 @@
+# Preserve benchmarked source bytes for evaluation.m0_common.code_hash().
+rag_reader/*.py -text
+evaluation/m0*.py -text
+evaluation/run_m0*.py -text
+evaluation/metrics.py -text
+evaluation/litsearch.py -text
+literature_database/schema.py -text
