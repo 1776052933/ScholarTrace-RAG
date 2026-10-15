@@ -77,13 +77,15 @@ openai
 pymupdf
 sentence-transformers
 chromadb
+langchain-core
 langchain-text-splitters
 ```
 
 可以使用以下命令安装：
 
 ```bash
-pip install pydantic openai pymupdf sentence-transformers chromadb langchain-text-splitters
+pip install pydantic openai pymupdf sentence-transformers chromadb langchain-core
+langchain-text-splitters
 ```
 
 各依赖用途：
@@ -93,6 +95,7 @@ pip install pydantic openai pymupdf sentence-transformers chromadb langchain-tex
 - `pymupdf`：PDF 文本提取；
 - `sentence-transformers`：加载 `BAAI/bge-m3` 并生成向量；
 - `chromadb`：向量存储和相似度检索；
+- `langchain-core`：统一构造问答、摘要和知识抽取提示词；
 - `langchain-text-splitters`：递归文本切片。
 
 首次使用 BGE-M3 时，`sentence-transformers` 会下载模型文件，需要可用的模型下载环境和足够的磁盘空间。
@@ -143,7 +146,7 @@ from rag_reader.pipeline import RAGReader
 from rag_reader.vector_store import VectorStore
 
 vector_store = VectorStore(
-    collection_name="paper_chunks",
+    collection_name="paper_chunks_m1",
     persist_directory="./data/chroma",
 )
 
@@ -186,7 +189,7 @@ resource = PaperResource(
 
 reader = RAGReader(
     vector_store=VectorStore(
-        collection_name="paper_chunks",
+        collection_name="paper_chunks_m1",
         persist_directory="./data/chroma",
     )
 )
@@ -238,3 +241,12 @@ python -m rag_reader.examples ./papers/paper.pdf --title "论文标题"
 ```
 
 该示例会依次完成 PDF 导入、Chroma 建库、知识抽取、摘要生成和论文问答，并输出回答所引用的来源 Chunk。
+
+
+## M1 的页码、配置与索引保护
+
+PDF 入库现在逐页清洗与切块；即使提供了 `text_path`，只要 `file_path` 是 PDF，仍优先读取 PDF 以保留页码。TXT/Markdown 没有真实 PDF 页，`page` 为 `null`。问答结果保留兼容字段 `sources`，并增加 `citations`：每条含 `paper_id`、`chunk_id`、标题、页码、章节、原文和检索分数。仅有引用不等于该引用一定支持答案，仍需评测。
+
+`RAGSettings` 集中配置 embedding、切块、Top-K、集合名和 DeepSeek 参数；可用 `RAG_CHUNK_SIZE`、`RAG_CHUNK_OVERLAP`、`RAG_TOP_K`、`RAG_EMBEDDING_MODEL`、`DEEPSEEK_MODEL` 等环境变量覆盖。纯检索无需 DeepSeek 密钥；真正调用模型时才读取密钥。
+
+BGE-M3 加载失败会报错，不再静默使用哈希向量。新 Chroma 集合名是 `paper_chunks_m1`，会记录 embedding 模型修订和维度；旧 `paper_chunks` 索引不会自动混入。升级旧数据时请重新摄取论文到新集合。同一集合遇到不同模型或无版本旧向量会返回 `index_incompatible` 错误。

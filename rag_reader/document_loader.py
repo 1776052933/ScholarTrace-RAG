@@ -4,11 +4,12 @@ from pathlib import Path
 from typing import Dict, Optional, Sequence, Tuple
 
 from literature_database.schema import PaperResource
+from .errors import RAGDocumentError
 
 from .schema import PaperDocument
 
 
-class DocumentLoadError(RuntimeError):
+class DocumentLoadError(RAGDocumentError):
     """论文文件加载失败。"""
 
 

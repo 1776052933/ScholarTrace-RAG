@@ -2,6 +2,8 @@
 
 输入研究问题后，项目依次完成查询理解与拆解、多来源论文检索、引文扩展、论文排序、开放全文获取，以及基于论文内容的摘要、知识抽取和问答。
 
+后续升级目标与阶段见[升级计划](docs/UPGRADE_PLAN.md)。数据集位置见[数据集说明](docs/DATASETS.md)；[M0 评测说明](evaluation/M0.md)、[M0 十题基线](evaluation/M0_BASELINE.md)和[M1 对照](evaluation/M1_COMPARISON.md)可用于同输入复测。[版本归档与 M1 工程验收](docs/VERSION_ARCHIVE_AND_M1_ACCEPTANCE.md)记录了源码、运行包校验和及验收边界。
+
 项目采用模块化工作流。`SearchAgent` 在单个搜索流程内进行规划、检索、评价和多轮调整；其他以 Agent 命名的模块承担排序等职责。当前实现没有多个自主 Agent 之间的任务委派与协作机制。
 
 ## 主要模块
@@ -13,8 +15,9 @@
 | `ranking_agent/` | 用 BGE-M3、元数据特征和大模型评分排序论文 |
 | `paper_downloader/`、`literature_database/` | 获取开放全文，管理下载状态及论文记录 |
 | `rag_reader/` | 解析全文、切分、向量检索、摘要、知识抽取与证据问答 |
-| `evaluation/` | 论文检索评测；当前评测不覆盖全文问答质量 |
+| `evaluation/` | M0 固定语料检索、QASPER 全文问答与在线搜索评测 |
 | `Auto_Paper_UI/` | Streamlit 界面和结果导出 |
+| `app/services/` | 可由 CLI、后续 API 与 MCP 共用的研究工作流 |
 
 ## 本地运行
 

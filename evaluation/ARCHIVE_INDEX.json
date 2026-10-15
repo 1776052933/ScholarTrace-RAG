@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "created_at_utc": "2026-10-15T09:28:57.764041+00:00",
+  "data_split": "QASPER v0.3 dev",
+  "m0_source_tag": "m0-reconstructed-2026-10-15",
+  "m0_reconstructed_code_sha256": "0a3c960c8c92dd405d4e53d0f90273282838d15c4c72ee1c11bbaeb0c2ca8e10",
+  "m0_exact_source_available": false,
+  "m1_source_tag": "m1-accepted-2026-10-15",
+  "m1_code_matches_run": true,
+  "runs": {
+    "m0": {
+      "run_directory": "evaluation/runs/m0_qasper_dev10",
+      "archive_zip": "evaluation/runs/_archives/m0_qasper_dev10.zip",
+      "archive_sha256": "1420abec4bb6154b0193e53575a911ad72084980e7c648888effa495c50367a0",
+      "archive_file_count": 24,
+      "recorded_code_sha256": "f2d4a169aec3cfe5f2fc2d2d509721859463f27fa2bd9a04ed33948145fceae3",
+      "dataset_sha256": "2ae7ee62a65b1c4225791c70de80c2aad4e8998cf1fd4f09a53103db4f21af93",
+      "question_ids": [
+        "662870a90890c620a964720b2ca122a1139410ea",
+        "4dcf67b5e7bd1422e7e70c657f6eacccd8de06d3",
+        "e431661f17347607c3d3d9764928385a8f3d9650",
+        "d8627ba08b7342e473b8a2b560baa8cdbae3c7fd",
+        "4d706ce5bde82caf40241f5b78338ea5ee5eb01e",
+        "5c5aeee83ea3b34f5936404f5855ccb9869356c1",
+        "c77359fb9d3ef96965a9af0396b101f82a0a9de6",
+        "f318a2851d7061f05a5b32b94251f943480fbd15",
+        "6f024d4c952fbb53b6f8cf27020659aa4d9a6590",
+        "a267d620af319b48e56c191aa4c433ea3870f6fb"
+      ],
+      "model_revision": "5617a9f61b028005a4858fdac845db406aefb181",
+      "completed_count": 10,
+      "failed_count": 0
+    },
+    "m1": {
+      "run_directory": "evaluation/runs/m1_qasper_dev10_final",
+      "archive_zip": "evaluation/runs/_archives/m1_qasper_dev10_final.zip",
+      "archive_sha256": "54990d7053890525be5ce84a519e8e6f2f84472b82d570ccc643e831de54a7f6",
+      "archive_file_count": 24,
+      "recorded_code_sha256": "cdcefd281acdd1ac385f95d7e9f751f2be785788b89e953536d7183e2434b58e",
+      "dataset_sha256": "2ae7ee62a65b1c4225791c70de80c2aad4e8998cf1fd4f09a53103db4f21af93",
+      "question_ids": [
+        "662870a90890c620a964720b2ca122a1139410ea",
+        "4dcf67b5e7bd1422e7e70c657f6eacccd8de06d3",
+        "e431661f17347607c3d3d9764928385a8f3d9650",
+        "d8627ba08b7342e473b8a2b560baa8cdbae3c7fd",
+        "4d706ce5bde82caf40241f5b78338ea5ee5eb01e",
+        "5c5aeee83ea3b34f5936404f5855ccb9869356c1",
+        "c77359fb9d3ef96965a9af0396b101f82a0a9de6",
+        "f318a2851d7061f05a5b32b94251f943480fbd15",
+        "6f024d4c952fbb53b6f8cf27020659aa4d9a6590",
+        "a267d620af319b48e56c191aa4c433ea3870f6fb"
+      ],
+      "model_revision": "5617a9f61b028005a4858fdac845db406aefb181",
+      "completed_count": 10,
+      "failed_count": 0
+    }
+  }
+}

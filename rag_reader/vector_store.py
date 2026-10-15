@@ -5,8 +5,10 @@ import logging
 import math
 from numbers import Real
 from pathlib import Path
+from threading import RLock
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
+from .errors import IndexCompatibilityError
 from .schema import DocumentChunk
 
 
@@ -18,7 +20,7 @@ class VectorStore:
 
     def __init__(
         self,
-        collection_name: str = "paper_chunks",
+        collection_name: str = "paper_chunks_m1",
         *,
         persist_directory: Optional[str] = None,
         client: Any = None,
@@ -29,6 +31,7 @@ class VectorStore:
             raise ValueError("collection_name must not be empty")
         self.collection_name = collection_name
         self.persist_directory = persist_directory
+        self._configuration_lock = RLock()
 
         if collection is not None:
             self.client = client
@@ -52,6 +55,33 @@ class VectorStore:
             name=collection_name,
             metadata={"hnsw:space": "cosine"},
         )
+
+    def ensure_embedding_compatible(self, fingerprint: str, dimension: int) -> None:
+        """Bind an empty collection, or reject a mismatched/legacy vector index."""
+        fingerprint = fingerprint.strip()
+        if not fingerprint or dimension < 1:
+            raise ValueError("fingerprint and positive dimension are required")
+        with self._configuration_lock:
+            metadata = dict(self.collection.metadata or {})
+            saved_fingerprint = metadata.get("embedding_fingerprint")
+            saved_dimension = metadata.get("embedding_dimension")
+            if saved_fingerprint is None:
+                if self.collection.count() > 0:
+                    raise IndexCompatibilityError(
+                        f"collection {self.collection_name} has unversioned vectors; "
+                        "rebuild into a new collection before querying or indexing"
+                    )
+                self.collection.modify(metadata={
+                    **{key: value for key, value in metadata.items() if key != "hnsw:space"},
+                    "embedding_fingerprint": fingerprint,
+                    "embedding_dimension": dimension,
+                })
+                return
+            if saved_fingerprint != fingerprint or saved_dimension != dimension:
+                raise IndexCompatibilityError(
+                    f"collection {self.collection_name} was built with "
+                    f"{saved_fingerprint}/{saved_dimension}, requested {fingerprint}/{dimension}"
+                )
 
     def add_documents(
         self,

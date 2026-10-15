@@ -9,6 +9,8 @@ from typing import Any, Dict, Optional
 from pydantic import ValidationError
 
 from .llm_client import DeepSeekClient
+from .errors import RAGGenerationError
+from .prompt_adapter import build_messages
 from .prompts import PAPER_EXTRACTION_PROMPT
 from .schema import PaperDocument, PaperKnowledge
 
@@ -16,7 +18,7 @@ from .schema import PaperDocument, PaperKnowledge
 logger = logging.getLogger(__name__)
 
 
-class PaperKnowledgeParseError(ValueError):
+class PaperKnowledgeParseError(RAGGenerationError, ValueError):
     """DeepSeek 返回内容无法解析为 ``PaperKnowledge``。"""
 
 
@@ -59,10 +61,7 @@ class PaperKnowledgeExtractor:
         payload = {"title": document.title, "content": content}
         logger.info("调用 DeepSeek 抽取论文知识：paper_id=%s", document.paper_id)
         response = client.chat(
-            [
-                {"role": "system", "content": PAPER_EXTRACTION_PROMPT},
-                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-            ],
+            build_messages(PAPER_EXTRACTION_PROMPT, payload),
             temperature=0.0,
             max_tokens=3000,
         )

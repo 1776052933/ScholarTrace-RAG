@@ -8,10 +8,12 @@ from typing import Any, Dict, List, Optional, Union
 from literature_database.schema import PaperResource
 
 from .cleaner import TextCleaner
+from .config import RAGSettings
 from .document_loader import DocumentLoader
-from .embedding import EmbeddingModel
+from .embedding import EmbeddingModel, embedding_fingerprint
+from .errors import RAGNotFoundError
 from .extractor import PaperKnowledgeExtractor
-from .llm_client import DeepSeekClient
+from .llm_client import DeepSeekClient, LazyDeepSeekClient
 from .parser import PDFParser
 from .qa import PaperQA
 from .retriever import PaperRetriever
@@ -24,7 +26,7 @@ from .vector_store import VectorStore
 logger = logging.getLogger(__name__)
 
 
-class PaperNotIngestedError(LookupError):
+class PaperNotIngestedError(RAGNotFoundError, LookupError):
     """请求的论文尚未通过 ``ingest_paper`` 加入当前 RAGReader。"""
 
 
@@ -50,21 +52,35 @@ class RAGReader:
         *,
         retriever: Optional[PaperRetriever] = None,
         llm_client: Optional[DeepSeekClient] = None,
+        settings: Optional[RAGSettings] = None,
     ) -> None:
+        self.settings = settings or RAGSettings.from_env()
         self.document_loader = document_loader or DocumentLoader()
         self.pdf_parser = pdf_parser or PDFParser()
         self.cleaner = cleaner or TextCleaner()
-        self.splitter = splitter or DocumentSplitter()
-        self.embedding_model = embedding_model or EmbeddingModel()
-        self.vector_store = vector_store or VectorStore()
-
+        self.splitter = splitter or DocumentSplitter(
+            chunk_size=self.settings.chunk_size,
+            chunk_overlap=self.settings.chunk_overlap,
+        )
+        self.embedding_model = embedding_model or EmbeddingModel(
+            model_name=self.settings.embedding_model,
+            device=self.settings.embedding_device,
+            batch_size=self.settings.embedding_batch_size,
+        )
+        self.vector_store = vector_store or VectorStore(
+            collection_name=self.settings.collection_name,
+        )
         self.retriever = retriever or PaperRetriever(
             embedding_model=self.embedding_model,
             vector_store=self.vector_store,
+            default_top_k=self.settings.retrieval_top_k,
         )
-        self.extractor = extractor or PaperKnowledgeExtractor(llm_client=llm_client)
-        self.qa = qa or PaperQA(self.retriever, llm_client=llm_client)
-        self.summarizer = summarizer or PaperSummarizer(llm_client=llm_client)
+        shared_client = llm_client or LazyDeepSeekClient(self.settings)
+        self.extractor = extractor or PaperKnowledgeExtractor(llm_client=shared_client)
+        self.qa = qa or PaperQA(
+            self.retriever, llm_client=shared_client, top_k=self.settings.retrieval_top_k,
+        )
+        self.summarizer = summarizer or PaperSummarizer(llm_client=shared_client)
 
         self._documents: Dict[str, PaperDocument] = {}
         self._chunks: Dict[str, List[DocumentChunk]] = {}
@@ -84,17 +100,22 @@ class RAGReader:
 
         document = self.document_loader.load(resource)
         raw_pages = self._load_pages(document)
-        cleaned_content = self.cleaner.clean(raw_pages)
+        cleaned_pages = self.cleaner.clean_page_records(raw_pages)
+        cleaned_content = "\n\n".join(page["text"] for page in cleaned_pages)
         if not cleaned_content:
             raise ValueError(f"paper contains no usable text: {document.paper_id}")
 
         document = document.model_copy(update={"content": cleaned_content}, deep=True)
-        chunks = self.splitter.split(document)
+        chunks = self.splitter.split(document, pages=cleaned_pages)
         if not chunks:
             raise ValueError(f"paper produced no document chunks: {document.paper_id}")
 
         # 先完成最耗时且可能失败的向量化，再替换旧索引，降低重摄取时的数据风险。
         embeddings = self.embedding_model.embed_chunks(chunks)
+        if hasattr(self.vector_store, "ensure_embedding_compatible"):
+            self.vector_store.ensure_embedding_compatible(
+                embedding_fingerprint(self.embedding_model), len(embeddings[0])
+            )
         self.vector_store.delete(paper_id=document.paper_id)
         stored = self.vector_store.add_documents(chunks, embeddings)
         if stored != len(chunks):
@@ -180,14 +201,13 @@ class RAGReader:
             return [chunk.model_copy(deep=True) for chunk in chunks]
 
     def _load_pages(self, document: PaperDocument) -> List[Dict[str, Any]]:
+        if document.file_path:
+            path = Path(document.file_path)
+            if path.suffix.casefold() == ".pdf":
+                return [dict(page) for page in self.pdf_parser.parse(path)]
         if document.content.strip():
-            return [{"page": 1, "text": document.content}]
-        if not document.file_path:
-            raise ValueError(f"paper has no readable content: {document.paper_id}")
-        path = Path(document.file_path)
-        if path.suffix.casefold() != ".pdf":
-            raise ValueError(f"paper has no readable content: {document.paper_id}")
-        return [dict(page) for page in self.pdf_parser.parse(path)]
+            return [{"page": None, "text": document.content}]
+        raise ValueError(f"paper has no readable content: {document.paper_id}")
 
     def _resolve_document(
         self,

@@ -1,0 +1,1 @@
+"""ScholarTrace application services."""

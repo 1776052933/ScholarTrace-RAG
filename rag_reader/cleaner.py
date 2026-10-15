@@ -23,34 +23,46 @@ class TextCleaner:
         self.repeated_line_ratio = repeated_line_ratio
 
     def clean(self, raw_pages: Sequence[Mapping[str, Any]]) -> str:
-        """清洗 ``[{page, text}]`` 页面并返回规范化全文。"""
+        """Clean pages and return the combined text for summarization."""
+        return "\n\n".join(page["text"] for page in self.clean_page_records(raw_pages))
+
+    def clean_page_records(
+        self, raw_pages: Sequence[Mapping[str, Any]]
+    ) -> List[dict[str, Any]]:
+        """Clean text while keeping each paragraph attached to its source page."""
         pages = _validate_pages(raw_pages)
         if not pages:
-            return ""
+            return []
         removable = self._repeated_margins(pages)
-        paragraphs: List[str] = []
+        seen: set[str] = set()
+        records: List[dict[str, Any]] = []
+        paragraph_count = 0
         for page in pages:
             lines = page["text"].replace("\r\n", "\n").replace("\r", "\n").split("\n")
             lines = self._remove_margins(lines, removable)
-            page_text = "\n".join(lines)
-            page_text = _remove_garbled_characters(page_text)
-            page_text = _replace_formulas(page_text)
-            paragraphs.extend(_merge_broken_lines(page_text.splitlines()))
-
-        unique = _deduplicate_paragraphs(paragraphs)
-        result = "\n\n".join(unique).strip()
+            text = _replace_formulas(_remove_garbled_characters("\n".join(lines)))
+            kept: List[str] = []
+            for paragraph in _merge_broken_lines(text.splitlines()):
+                value = re.sub(r"\s+", " ", paragraph).strip()
+                if not value:
+                    continue
+                key = value.casefold()
+                if value != FORMULA_PLACEHOLDER and key in seen:
+                    continue
+                seen.add(key)
+                kept.append(value)
+            if kept:
+                records.append({"page": page["page"], "text": "\n\n".join(kept)})
+                paragraph_count += len(kept)
         logger.info(
             "论文文本清洗完成：pages=%d, paragraphs=%d, characters=%d",
-            len(pages),
-            len(unique),
-            len(result),
+            len(pages), paragraph_count, sum(len(page["text"]) for page in records),
         )
-        return result
+        return records
 
     def clean_pages(self, raw_pages: Sequence[Mapping[str, Any]]) -> str:
-        """``clean`` 的语义化别名。"""
+        """Backward-compatible alias returning combined cleaned text."""
         return self.clean(raw_pages)
-
     def _repeated_margins(self, pages: List[dict[str, Any]]) -> set[str]:
         if len(pages) < 2:
             return set()

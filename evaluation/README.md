@@ -1,5 +1,7 @@
 # AutoPaper LitSearch 测评
 
+M0 固定基线评测（QASPER 全文问答与 LitSearch 固定语料检索）见 [M0.md](M0.md)。M1 同题对照见 [M1_COMPARISON.md](M1_COMPARISON.md)。
+
 该目录独立调用项目现有的 `AutoPaperWorkflow`，不修改查询理解、查询拆解、
 搜索 Agent 或精排 Agent 的实现。测评时关闭 PDF 下载和 RAG，只评估赛题核心的
 “查询 -> 检索 -> 去重 -> 精排 -> 论文列表”流程。

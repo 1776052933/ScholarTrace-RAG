@@ -9,15 +9,17 @@ from typing import Any, Dict, Optional
 from pydantic import ValidationError
 
 from .llm_client import DeepSeekClient
+from .errors import RAGGenerationError
+from .prompt_adapter import build_messages
 from .prompts import RAG_QA_PROMPT
 from .retriever import PaperRetriever
-from .schema import RAGAnswer
+from .schema import EvidenceCitation, RAGAnswer
 
 
 logger = logging.getLogger(__name__)
 
 
-class RAGAnswerParseError(ValueError):
+class RAGAnswerParseError(RAGGenerationError, ValueError):
     """DeepSeek 问答输出不是合法 RAGAnswer。"""
 
 
@@ -68,10 +70,7 @@ class PaperQA:
         client = self._get_client()
         logger.info("调用 DeepSeek 论文问答：paper_id=%s, chunks=%d", paper_id, len(chunks))
         content = client.chat(
-            [
-                {"role": "system", "content": RAG_QA_PROMPT},
-                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-            ],
+            build_messages(RAG_QA_PROMPT, payload),
             temperature=0.0,
             max_tokens=2048,
         )
@@ -86,6 +85,19 @@ class PaperQA:
                 str(source) for source in raw_sources if str(source) in valid_sources
             ))
             data["sources"] = sources
+            by_id = {chunk.chunk_id: chunk for chunk in chunks}
+            data["citations"] = [
+                EvidenceCitation(
+                    paper_id=by_id[source].paper_id,
+                    chunk_id=source,
+                    title=str(by_id[source].metadata.get("title") or ""),
+                    page=by_id[source].page,
+                    section=by_id[source].section,
+                    excerpt=by_id[source].text,
+                    retrieval_score=by_id[source].metadata.get("retrieval_score"),
+                )
+                for source in sources
+            ]
             if not sources:
                 data["confidence"] = min(float(data.get("confidence") or 0.0), 0.5)
             return RAGAnswer.model_validate(data)

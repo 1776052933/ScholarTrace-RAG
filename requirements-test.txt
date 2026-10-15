@@ -1,0 +1,4 @@
+-r evaluation/requirements.txt
+-r Auto_Paper_UI/requirements-ui.txt
+pytest>=8,<9
+pytest-asyncio>=0.23,<0.24

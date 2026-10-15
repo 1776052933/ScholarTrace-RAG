@@ -9,6 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 from time import perf_counter
 from typing import Any, Dict, List, Optional
 
+from search_agent.identifiers import canonical_paper_key
+
 from .embedding import EmbeddingModel
 from .evaluator import PaperEvaluator
 from .feature import PaperFeatureExtractor
@@ -508,16 +510,9 @@ def _paper(value: Any) -> Paper:
         or None
     )
     raw_identifier = str(data.get("paper_id") or "").strip()
-    exact_identifier = raw_identifier if (
-        raw_identifier.startswith(("http://", "https://", "10."))
-    ) else ""
     identifier = (
-        pdf_url
-        or (f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id else "")
-        or exact_identifier
-        or doi
-        or url
-        or raw_identifier
+        raw_identifier
+        or canonical_paper_key({**data, "doi": doi, "arxiv_id": arxiv_id, "openalex_id": openalex_id})
         or _stable_title_id(title)
     )
     authors = data.get("authors") or []

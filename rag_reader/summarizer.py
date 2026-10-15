@@ -9,6 +9,8 @@ from typing import Any, Dict, Optional
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .llm_client import DeepSeekClient
+from .errors import RAGGenerationError
+from .prompt_adapter import build_messages
 from .prompts import SUMMARY_PROMPT
 from .schema import PaperDocument
 
@@ -16,7 +18,7 @@ from .schema import PaperDocument
 logger = logging.getLogger(__name__)
 
 
-class PaperSummaryParseError(ValueError):
+class PaperSummaryParseError(RAGGenerationError, ValueError):
     """DeepSeek 总结输出无法解析为指定结构。"""
 
 
@@ -72,10 +74,7 @@ class PaperSummarizer:
         payload = {"title": title, "content": content}
         logger.info("调用 DeepSeek 生成论文总结：title=%s", title)
         response = client.chat(
-            [
-                {"role": "system", "content": SUMMARY_PROMPT},
-                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-            ],
+            build_messages(SUMMARY_PROMPT, payload),
             temperature=0.1,
             max_tokens=2500,
         )

@@ -21,6 +21,9 @@ except ImportError:  # 允许未启用 LLM 时导入 rag_reader。
         pass
 
 
+from .config import RAGSettings
+from .errors import RAGGenerationError
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
@@ -28,7 +31,7 @@ DEFAULT_MODEL = "deepseek-chat"
 DEFAULT_TIMEOUT = 60.0
 
 
-class DeepSeekError(RuntimeError):
+class DeepSeekError(RAGGenerationError):
     """DeepSeek 客户端异常基类。"""
 
 
@@ -210,3 +213,31 @@ def _project_key() -> str:
         return str(key_get("deepseek") or "")
     except (ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError):
         return ""
+
+class LazyDeepSeekClient:
+    """Share one configured DeepSeek client without requiring a key at RAG startup."""
+
+    def __init__(self, settings: RAGSettings) -> None:
+        self.settings = settings
+        self._client: DeepSeekClient | None = None
+        self._lock = Lock()
+
+    def _get_client(self) -> DeepSeekClient:
+        if self._client is None:
+            with self._lock:
+                if self._client is None:
+                    self._client = DeepSeekClient(
+                        base_url=self.settings.llm_base_url,
+                        model=self.settings.llm_model,
+                        timeout=self.settings.llm_timeout_seconds,
+                    )
+        return self._client
+
+    def chat(self, messages: List[Mapping[str, Any]], **kwargs: Any) -> str:
+        return self._get_client().chat(messages, **kwargs)
+
+    def get_token_usage(self) -> dict[str, dict[str, int]]:
+        if self._client is None:
+            empty = TokenUsage().to_dict()
+            return {"last": empty.copy(), "total": empty.copy()}
+        return self._client.get_token_usage()

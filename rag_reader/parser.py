@@ -3,12 +3,13 @@
 import logging
 from pathlib import Path
 from typing import Dict, List, Union
+from .errors import RAGDocumentError
 
 
 logger = logging.getLogger(__name__)
 
 
-class PDFParserError(RuntimeError):
+class PDFParserError(RAGDocumentError):
     """PDF 解析异常基类。"""
 
 

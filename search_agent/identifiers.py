@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Any, Iterable
 
 
@@ -107,11 +108,13 @@ def enrich_paper_identifiers(paper: Any) -> Any:
 
 
 def paper_identity_keys(paper: Any, *, include_title: bool = True) -> set[str]:
-    enriched = enrich_paper_identifiers(paper)
+    enriched = enrich_paper_identifiers(paper) if not isinstance(paper, Mapping) else paper
+    get = enriched.get if isinstance(enriched, Mapping) else lambda name: getattr(enriched, name, None)
+    source_values = (get("doi"), get("arxiv_id"), get("openalex_id"), get("url"), get("pdf_url"), get("paper_id"))
     keys: set[str] = set()
-    doi = normalize_doi(getattr(enriched, "doi", None))
-    arxiv_id = normalize_arxiv_id(getattr(enriched, "arxiv_id", None))
-    openalex_id = normalize_openalex_id(getattr(enriched, "openalex_id", None))
+    doi = extract_doi(*source_values)
+    arxiv_id = extract_arxiv_id(*source_values)
+    openalex_id = extract_openalex_id(*source_values)
     if doi:
         keys.add(f"doi:{doi}")
     if arxiv_id:
@@ -119,7 +122,7 @@ def paper_identity_keys(paper: Any, *, include_title: bool = True) -> set[str]:
     if openalex_id:
         keys.add(f"openalex:{openalex_id.casefold()}")
     if include_title:
-        title = normalize_title(getattr(enriched, "title", ""))
+        title = normalize_title(get("title"))
         if title:
             keys.add(f"title:{title}")
     return keys

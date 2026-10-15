@@ -2,7 +2,7 @@
 
 from typing import Any, Iterable, List, Mapping, Optional
 
-from .embedding import EmbeddingModel
+from .embedding import EmbeddingModel, embedding_fingerprint
 from .schema import DocumentChunk
 from .vector_store import VectorStore
 
@@ -38,6 +38,10 @@ class PaperRetriever:
             if not paper_id:
                 raise ValueError("paper_id must not be empty")
         query_vector = self.embedding_model.embed(question)
+        if hasattr(self.vector_store, "ensure_embedding_compatible"):
+            self.vector_store.ensure_embedding_compatible(
+                embedding_fingerprint(self.embedding_model), len(query_vector)
+            )
         results = self.vector_store.search(
             query_vector,
             top_k=limit,
@@ -59,6 +63,10 @@ class PaperRetriever:
         if not ids:
             return []
         query_vector = self.embedding_model.embed(question)
+        if hasattr(self.vector_store, "ensure_embedding_compatible"):
+            self.vector_store.ensure_embedding_compatible(
+                embedding_fingerprint(self.embedding_model), len(query_vector)
+            )
         merged = []
         for paper_id in ids:
             merged.extend(self.vector_store.search(

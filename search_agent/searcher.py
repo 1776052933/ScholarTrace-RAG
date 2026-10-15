@@ -7,6 +7,7 @@ import logging
 from typing import Dict, Iterable, List, Optional, Protocol
 
 from .identifiers import (
+    canonical_paper_key,
     enrich_paper_identifiers,
     normalize_doi,
     normalize_title,
@@ -106,10 +107,10 @@ def to_internal_paper(value: PaperMetadata, query: str = "", source: str = "") -
     data["sources"] = _unique([*value.sources, actual_source])
     data["matched_queries"] = _unique([*value.matched_queries, query])
     if isinstance(value, Paper):
-        data["paper_id"] = value.paper_id
+        data["paper_id"] = canonical_paper_key(value) or value.paper_id
         data["relevance_score"] = value.relevance_score
     else:
-        data["paper_id"] = (
+        data["paper_id"] = canonical_paper_key(value) or (
             value.doi
             or (f"https://arxiv.org/abs/{value.arxiv_id}" if value.arxiv_id else "")
             or (f"https://openalex.org/{value.openalex_id}" if value.openalex_id else "")
@@ -148,7 +149,10 @@ def deduplicate_papers(papers: Iterable[PaperMetadata]) -> List[Paper]:
         merged[index] = existing
         for key in paper_identity_keys(existing):
             key_to_index[key] = index
-    return [paper for paper in merged if paper is not None]
+    result = [paper for paper in merged if paper is not None]
+    for paper in result:
+        paper.paper_id = canonical_paper_key(paper) or paper.paper_id
+    return result
 
 
 def _merge_paper(existing: Paper, paper: Paper) -> Paper:

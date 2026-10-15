@@ -60,10 +60,22 @@ class PaperKnowledge(SchemaModel):
     future_work: str = ""
 
 
+class EvidenceCitation(SchemaModel):
+    """A validated, locatable source excerpt returned with an answer."""
+
+    paper_id: str = Field(min_length=1)
+    chunk_id: str = Field(min_length=1)
+    title: str = ""
+    page: Optional[int] = Field(default=None, ge=1)
+    section: str = ""
+    excerpt: str = Field(min_length=1)
+    retrieval_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
 class RAGAnswer(SchemaModel):
     """基于论文检索证据生成的回答。"""
 
     question: str = Field(min_length=1)
     answer: str = Field(min_length=1)
     sources: List[str] = Field(default_factory=list, description="引用的论文或切片标识")
+    citations: List[EvidenceCitation] = Field(default_factory=list, description="可定位原文证据")
     confidence: float = Field(ge=0.0, le=1.0, description="回答置信度")
