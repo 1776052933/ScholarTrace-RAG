@@ -4,10 +4,10 @@
 
 | 阶段 | Git 位置 | 与当时十题运行源码的关系 |
 | --- | --- | --- |
-| M0 | `archive/m0-reconstructed`，标签 `m0-reconstructed-2026-10-15`，提交 `2bb0c5e` | 从初始提交补入评测器重建。重建代码指纹 `0a3c960c8c92dd405d4e53d0f90273282838d15c4c72ee1c11bbaeb0c2ca8e10`，与原始运行记录 `f2d4a169aec3cfe5f2fc2d2d509721859463f27fa2bd9a04ed33948145fceae3` 不一致，因此**不是原始 M0 的精确源码**。详细说明见 M0 分支的 `docs/M0_ARCHIVE_STATUS.md`。 |
+| M0 | `archive/m0-reconstructed`，标签 `m0-reconstructed-2026-10-15`，提交 `e341a6e` | 从初始提交补入评测器重建。重建代码指纹 `0a3c960c8c92dd405d4e53d0f90273282838d15c4c72ee1c11bbaeb0c2ca8e10`，与原始运行记录 `f2d4a169aec3cfe5f2fc2d2d509721859463f27fa2bd9a04ed33948145fceae3` 不一致，因此**不是原始 M0 的精确源码**。详细说明见 M0 分支的 `docs/M0_ARCHIVE_STATUS.md`。 |
 | M1 | `main`，标签 `m1-accepted-2026-10-15` | 当前源码指纹 `cdcefd281acdd1ac385f95d7e9f751f2be785788b89e953536d7183e2434b58e`，与最终 M1 十题运行记录一致。 |
 
-M1 为参与 `code_hash()` 的源码路径设置了 `.gitattributes` 的 `-text`，保留评测时的原始换行字节。该设置只影响 Git 存储与检出；已核对暂存内容与评测工作区逐字节相同，代码内容没有改动。
+M1 为参与 `code_hash()` 的源码路径设置了 `.gitattributes` 的 `-text`，保留评测时的原始换行字节。该设置只影响 Git 存储与检出；已核对暂存内容与评测工作区逐字节相同，代码内容没有改动。 两个标签均已在独立新检出的工作区核对其记录的源码指纹。
 
 两次运行的 QASPER v0.3 开发集 SHA256 均为 `2ae7ee62a65b1c4225791c70de80c2aad4e8998cf1fd4f09a53103db4f21af93`；十个 question ID 与 BGE-M3 模型修订也一致。原始 M0 数值只能作为已保存的历史参考基线，不能把重建分支的新运行结果当成该次运行的严格复现。M0/M1 的质量对照和指标限制见 `evaluation/M1_COMPARISON.md`。
 
