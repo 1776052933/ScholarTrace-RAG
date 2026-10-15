@@ -105,16 +105,24 @@ def ask_paper_question(
 
     if str(PROJECT_ROOT) not in sys.path:
         sys.path.insert(0, str(PROJECT_ROOT))
+    from rag_reader.config import RAGSettings
     from rag_reader.llm_client import DeepSeekClient
     from rag_reader.pipeline import RAGReader
     from rag_reader.vector_store import VectorStore
 
-    llm_client = DeepSeekClient(api_key=deepseek_api_key)
+    settings = RAGSettings.from_env()
+    llm_client = DeepSeekClient(
+        api_key=deepseek_api_key,
+        base_url=settings.llm_base_url,
+        model=settings.llm_model,
+        timeout=settings.llm_timeout_seconds,
+    )
     reader = RAGReader(
         vector_store=VectorStore(
             persist_directory=str(RUNTIME_ROOT / "chroma"),
         ),
         llm_client=llm_client,
+        settings=settings,
     )
     answer = reader.ask(paper_id, question)
     if hasattr(answer, "model_dump"):

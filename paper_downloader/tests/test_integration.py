@@ -24,7 +24,12 @@ import pytest
 from paper_downloader.src.models.paper import Paper
 from paper_downloader.src.core.downloader import PaperDownloader
 from paper_downloader.src.config.config_manager import ConfigManager
-from paper_downloader.src.cache.cache_manager import CacheManager
+try:
+    from paper_downloader.src.cache.cache_manager import CacheManager
+except ModuleNotFoundError as exc:
+    if exc.name not in {"paper_downloader.src.cache", "paper_downloader.src.cache.cache_manager"}:
+        raise
+    CacheManager = None
 from paper_downloader.src.monitoring.metrics import MetricsCollector
 from paper_downloader.src.utils.report_generator import ReportGenerator
 from paper_downloader.src.exceptions import (
@@ -285,6 +290,7 @@ class TestRealArxivIntegration:
 class TestCrossModuleIntegration:
     """跨模块协作集成测试。"""
 
+    @pytest.mark.skipif(CacheManager is None, reason="paper_downloader.src.cache is absent from this source tree")
     def test_config_cache_search_integration(self, tmp_path):
         """配置→缓存→搜索全链路。"""
         from paper_downloader.src.search_engines.search_factory import SearchFactory

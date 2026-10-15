@@ -1172,8 +1172,28 @@ def render_interactive_qa(
             confidence = answer.get("confidence")
             if confidence is not None:
                 st.caption(f"回答置信度：{confidence}")
+            citations = [
+                item for item in answer.get("citations") or []
+                if isinstance(item, dict)
+            ]
             sources = answer.get("sources") or []
-            if sources:
+            if citations:
+                with st.expander(f"证据片段（{len(citations)}）"):
+                    for index, citation in enumerate(citations, start=1):
+                        st.markdown(f"**{index}. {citation.get('title') or '论文证据'}**")
+                        location = []
+                        if citation.get("paper_id"):
+                            location.append(str(citation["paper_id"]))
+                        if citation.get("page") is not None:
+                            location.append(f"第 {citation['page']} 页")
+                        if citation.get("section"):
+                            location.append(str(citation["section"]))
+                        if citation.get("chunk_id"):
+                            location.append(str(citation["chunk_id"]))
+                        if location:
+                            st.caption(" · ".join(location))
+                        st.write(str(citation.get("excerpt") or ""))
+            elif sources:
                 with st.expander(f"证据片段（{len(sources)}）"):
                     for source in sources:
                         st.code(str(source), language="text")

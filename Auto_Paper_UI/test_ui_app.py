@@ -155,3 +155,33 @@ def test_old_graph_results_receive_research_target_edges():
             "depth": 0,
         },
     ]
+
+def test_answer_panel_shows_locatable_evidence():
+    result = _result()
+    result["stages"]["rag_reader"]["outputs"]["paper-1"] = {
+        "answer": {
+            "question": "What changed?",
+            "answer": "Attention replaced recurrence.",
+            "confidence": 0.8,
+            "sources": ["paper-1-chunk-2"],
+            "citations": [{
+                "paper_id": "paper-1",
+                "chunk_id": "paper-1-chunk-2",
+                "title": "Transformer source",
+                "page": 2,
+                "section": "Methods",
+                "excerpt": "Attention replaces recurrent layers.",
+            }],
+        },
+    }
+    app = AppTest.from_file(str(APP_PATH))
+    app.run(timeout=20)
+    app.session_state["result"] = result
+    app.run(timeout=20)
+
+    assert not app.exception
+    visible_text = "\n".join(str(item.value) for item in [*app.markdown, *app.get("caption")])
+    assert "Transformer source" in visible_text
+    assert "第 2 页" in visible_text
+    assert "Methods" in visible_text
+    assert "Attention replaces recurrent layers." in visible_text
