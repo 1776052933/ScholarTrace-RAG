@@ -171,4 +171,4 @@ M1 已完成逐页 PDF 入库与结构化引用、BGE-M3 失败显式报错、�
 
 ## M2 当前进度（2026-10-15）
 
-已实现 FastAPI 契约与任务/问答接口、MySQL/Alembic 数据模型与初始迁移、旧 SQLite 论文库备份导入、Docker Compose 基础服务和 Streamlit HTTP 客户端。API/UI 的真实界面与 API 重启验收已在独立 SQLite 数据库完成；MySQL 实例联调仍需 Docker/MySQL 运行环境，详见 [M2 运行与验收](M2_RUN_AND_ACCEPTANCE.md)。
+已实现 FastAPI 契约与任务/问答接口、MySQL/Alembic 数据模型与初始迁移、旧 SQLite 论文库备份导入、Docker Compose 基础服务和 Streamlit HTTP 客户端。API/UI 的真实界面与 API 重启验收先在独立 SQLite 数据库完成，随后在 Windows 原生 MySQL 8.4.11 上完成实际 Alembic 迁移、M1 旧库导入、有效论文重建索引、真实浏览器检索/下载/问答以及服务重启恢复。Docker Compose 运行路径仍需有 Docker/WSL 的环境复核，详见 [M2 运行与验收](M2_RUN_AND_ACCEPTANCE.md)。

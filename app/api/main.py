@@ -9,7 +9,7 @@ from typing import Any, Callable
 from fastapi import FastAPI, HTTPException
 from sqlalchemy import select, text
 
-from app.api.schemas import JobSnapshot, PaperSummary, QuestionRequest, QuestionResponse, ResearchOptions
+from app.api.schemas import JobListItem, JobSnapshot, PaperSummary, QuestionRequest, QuestionResponse, ResearchOptions
 from app.config import ModelSettings
 from app.services.jobs import JobBusyError, ResearchJobRunner
 from app.services.questions import QuestionService
@@ -71,8 +71,8 @@ def create_app(
         except (OSError, RuntimeError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    @app.get("/api/v1/jobs", response_model=list[JobSnapshot])
-    def list_jobs(limit: int = 20) -> list[JobSnapshot]:
+    @app.get("/api/v1/jobs", response_model=list[JobListItem])
+    def list_jobs(limit: int = 20) -> list[JobListItem]:
         if not 1 <= limit <= 100:
             raise HTTPException(status_code=422, detail="limit must be between 1 and 100")
         return runner.store.list_recent(limit)

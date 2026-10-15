@@ -41,10 +41,32 @@ python -m streamlit run Auto_Paper_UI/ui_app.py
 
 M2 继续使用 Chroma/BGE-M3；MySQL 中保存论文、任务和问答结果。固定语料质量改进属于 M3/M6 的检索与评测工作。
 
-## 本次 M2 验收记录
+## 本次 M2 验收记录（2026-10-15）
 
-- 契约与表结构：Alembic 在全新 SQLite 数据库升级到 head；实际 Alembic 迁移离线编译了 MySQL SQL（7 张表，含 Alembic 版本表及论文标题的前缀索引）。
-- API 与界面：用真实浏览器经 Streamlit → FastAPI 完成论文检索、下载、PDF 入库与追问；论文 `arxiv:1706.03762` 产生 67 个检索片段，回答可展开定位至 PDF 第 3 页。
-- 重启持久化：停止并重启 API 后，同一数据库中的任务、论文和问答证据仍可读取；新浏览器会话从侧边栏恢复已完成任务。
-- 回归测试：包含 API 任务生命周期、取消、中断恢复、SQLite 导入和统一模型配置的自动化测试；完整非慢速测试集结果为 441 passed、22 skipped、3 deselected。
-- 环境边界：此工作环境没有可运行的 Docker/MySQL 服务，因此 **MySQL 实例上的 Compose 启动、实际迁移和重启验收尚未执行**。上述真实浏览器和重启验证使用独立 SQLite 作为 M2 API 的本地存储；部署到有 Docker 的环境后，应再运行本页的 Compose 路径并复核 MySQL 数据留存。
+- **真实 MySQL 迁移**：在 Windows 本机 MySQL 8.4.11 上执行 Alembic `upgrade head`，得到 6 张业务表和 `alembic_version`，版本为 `2c63dc4ac6b4`。Docker/WSL 在这台机器上不可用，所以 Compose 运行路径尚未实测。
+- **旧数据迁移**：从 M1 SQLite 导入 27 篇论文、44 条文件记录、32 条下载任务和 2 条上传队列记录；PDF/文本文件均在新持久化目录中。重复执行导入时，已有记录被跳过。随后真实界面流程新增 1 条文件记录。
+- **旧论文索引**：只对 PDF 和解析文本均存在且状态有效的 16 篇论文重建 Chroma 索引，共 2435 个片段；`MISMATCH` 文件没有入库。其余 11 篇仍为 `PENDING`，需要补齐或修复原始资源后才能问答。
+- **真实界面流程**：浏览器经 Streamlit → FastAPI → MySQL 完成论文检索、下载、PDF 入库和追问。`arxiv:1706.03762` 下载及索引成功，产生 67 个片段；问答给出 Transformer 编码器 6 层，并能展开定位到 PDF 第 3 页。
+- **重启恢复**：停止并重启 API 后，同一个已完成任务仍有完整结果；27 篇论文和已保存的问答证据可由 API 读取。新浏览器会话从侧边栏恢复了任务和 11 个结果指标。另以模拟运行中任务验证了启动时会标记为 `interrupted` 且可重试。
+- **实测修复**：MySQL 对包含大 JSON 结果的任务列表排序出现内存错误，现列表只查询轻量摘要，详情按任务 ID 获取；Windows 中文绝对路径导致 Chroma HNSW 重载失败，向量存储改用指向同目录的 ASCII 相对路径。两项均通过真实服务复测。
+- **回归范围**：API 生命周期、任务恢复、旧库迁移、索引状态筛选、Windows 路径、界面逻辑等纳入自动化测试；完整非慢速测试结果为 **443 passed、22 skipped、3 deselected**。
+
+### 在原生 MySQL 上复核
+
+准备 MySQL 8.4 实例和独立数据库账号，设置 `DATABASE_URL` 与 `AUTO_PAPER_DATA_ROOT`，然后在项目根目录执行：
+
+```powershell
+python -m alembic upgrade head
+python -m scripts.migrate_sqlite_to_mysql --source Auto_Paper_UI/runtime/literature.db --assets-root data/m2/papers --backup-dir data/m2/backups
+python -m scripts.reindex_migrated_papers --data-root data/m2
+python -m uvicorn app.api.main:app --host 127.0.0.1 --port 8000 --workers 1
+```
+
+另开终端运行界面：
+
+```powershell
+$env:AUTO_PAPER_API_URL='http://127.0.0.1:8000'
+python -m streamlit run Auto_Paper_UI/ui_app.py
+```
+
+使用 API 的 `/api/v1/health`、`/api/v1/jobs` 和 `/api/v1/papers` 检查持久化结果，再从 Streamlit 执行检索和问答。真实服务与旧库路径必须指向同一套持久化数据。Windows 中文目录下建议从项目根目录启动服务，使 Chroma 能使用 ASCII 相对路径。

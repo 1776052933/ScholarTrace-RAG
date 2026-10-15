@@ -1362,7 +1362,11 @@ def render_recent_jobs() -> None:
         labels = [f"{item['status']} · {item['query'][:35]} · {item['job_id'][:8]}" for item in jobs]
         choice = st.selectbox("选择已有任务", range(len(jobs)), format_func=lambda i: labels[i])
         if st.button("恢复查看任务", use_container_width=True):
-            selected = jobs[choice]
+            try:
+                selected = poll_workflow(jobs[choice]["job_id"])
+            except WorkflowRunError as exc:
+                st.error(str(exc))
+                return
             if selected["status"] == "completed":
                 _store_completed_workflow(selected)
                 st.session_state.pop("active_workflow_job_id", None)

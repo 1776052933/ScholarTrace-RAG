@@ -63,6 +63,19 @@ class JobSnapshot(BaseModel):
     elapsed_seconds: float = 0.0
 
 
+class JobListItem(BaseModel):
+    job_id: str
+    query: str
+    status: JobStatus
+    stage: str | None = None
+    progress: int = Field(ge=0, le=100)
+    error: str | None = None
+    retryable: bool = False
+    created_at: datetime
+    updated_at: datetime
+    elapsed_seconds: float = 0.0
+
+
 class QuestionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     paper_id: str = Field(min_length=1, max_length=255)

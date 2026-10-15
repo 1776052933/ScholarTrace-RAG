@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from sqlalchemy import select, update
 
-from app.api.schemas import JobSnapshot, ResearchOptions
+from app.api.schemas import JobListItem, JobSnapshot, ResearchOptions
 from app.storage.models import ResearchJobModel, utc_now
 from literature_database.database import DatabaseManager
 
@@ -65,12 +65,38 @@ class JobStore:
                 raise KeyError(job_id)
             return self._snapshot(row)
 
-    def list_recent(self, limit: int = 20) -> list[JobSnapshot]:
+    def list_recent(self, limit: int = 20) -> list[JobListItem]:
+        # Keep large result/log JSON out of MySQL's ORDER BY and the list payload.
         with self.database.get_session() as session:
-            rows = session.scalars(
-                select(ResearchJobModel).order_by(ResearchJobModel.created_at.desc()).limit(limit)
+            rows = session.execute(
+                select(
+                    ResearchJobModel.job_id,
+                    ResearchJobModel.query,
+                    ResearchJobModel.status,
+                    ResearchJobModel.stage,
+                    ResearchJobModel.progress,
+                    ResearchJobModel.error,
+                    ResearchJobModel.retryable,
+                    ResearchJobModel.created_at,
+                    ResearchJobModel.updated_at,
+                    ResearchJobModel.started_at,
+                    ResearchJobModel.finished_at,
+                )
+                .order_by(ResearchJobModel.created_at.desc(), ResearchJobModel.job_id.desc())
+                .limit(limit)
             ).all()
-            return [self._snapshot(row) for row in rows]
+            return [JobListItem(
+                job_id=row.job_id,
+                query=row.query,
+                status=row.status,
+                stage=row.stage,
+                progress=row.progress,
+                error=row.error,
+                retryable=row.retryable,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+                elapsed_seconds=max(0.0, ((row.finished_at or utc_now()) - (row.started_at or row.created_at)).total_seconds()),
+            ) for row in rows]
 
     def update(self, job_id: str, **changes: Any) -> JobSnapshot:
         with self.database.get_session() as session:

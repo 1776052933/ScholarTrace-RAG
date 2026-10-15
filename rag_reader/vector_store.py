@@ -3,6 +3,7 @@
 import json
 import logging
 import math
+import os
 from numbers import Real
 from pathlib import Path
 from threading import RLock
@@ -47,6 +48,15 @@ class VectorStore:
         if client is None:
             if persist_directory:
                 path = str(Path(persist_directory).expanduser())
+                if os.name == "nt" and not path.isascii():
+                    # Chroma HNSW can fail to reload an index from a Unicode absolute path on Windows.
+                    # An ASCII relative path to the same directory avoids the native path conversion.
+                    try:
+                        relative = os.path.relpath(path)
+                    except ValueError:
+                        relative = path
+                    if relative.isascii():
+                        path = relative
                 client = chromadb.PersistentClient(path=path)
             else:
                 client = chromadb.Client()

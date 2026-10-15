@@ -14,7 +14,12 @@ from rag_reader.pipeline import RAGReader
 from rag_reader.vector_store import VectorStore
 
 
+_PDF_READY = {"available", "completed", "downloaded", "success"}
+_TEXT_READY = {"available", "completed", "parsed", "success"}
+
+
 def rebuild(database_url: str, data_root: Path, paper_id: str | None = None) -> dict[str, int]:
+    data_root = Path(data_root).resolve()
     database = DatabaseManager(database_url)
     reader = RAGReader(vector_store=VectorStore(persist_directory=str(data_root / "chroma")))
     success = failed = 0
@@ -27,10 +32,10 @@ def rebuild(database_url: str, data_root: Path, paper_id: str | None = None) -> 
             resources = []
             for paper in papers:
                 files = session.scalars(select(PaperFileModel).where(PaperFileModel.paper_id == paper.paper_id)).all()
-                pdf = next((file for file in files if file.file_type.casefold() in {"pdf", "fulltext", "full_text"} and Path(file.file_path).is_file()), None)
-                if pdf is None:
+                pdf = next((file for file in files if file.file_type.casefold() in {"pdf", "fulltext", "full_text"} and file.status.casefold() in _PDF_READY and Path(file.file_path).is_file()), None)
+                text = next((file for file in files if file.file_type.casefold() in {"text", "txt", "parsed_text"} and file.status.casefold() in _TEXT_READY and Path(file.file_path).is_file()), None)
+                if pdf is None or text is None:
                     continue
-                text = next((file for file in files if file.file_type.casefold() in {"text", "txt", "parsed_text"} and Path(file.file_path).is_file()), None)
                 metadata = PaperMetadata(
                     paper_id=paper.paper_id,
                     title=paper.title,
@@ -47,7 +52,7 @@ def rebuild(database_url: str, data_root: Path, paper_id: str | None = None) -> 
                     paper=metadata,
                     availability=PaperAvailability.FULL_AVAILABLE,
                     file_path=pdf.file_path,
-                    text_path=text.file_path if text else None,
+                    text_path=text.file_path,
                     embedding_status=paper.embedding_status,
                 ))
         for resource in resources:

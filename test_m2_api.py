@@ -71,6 +71,9 @@ def test_api_job_survives_restart_and_reconciles_orphan(tmp_path, monkeypatch):
         assert done["status"] == "completed"
         assert done["result"]["query"] == "Example research"
         assert any("search_agent" in log for log in done["logs"])
+        listed = client.get("/api/v1/jobs").json()
+        assert listed[0]["job_id"] == job_id
+        assert "result" not in listed[0] and "logs" not in listed[0]
         with app.state.database.get_session() as session:
             session.add(ResearchJobModel(job_id="orphan", query="old", options={}, status="running", progress=30, logs=[], retryable=False))
             session.commit()

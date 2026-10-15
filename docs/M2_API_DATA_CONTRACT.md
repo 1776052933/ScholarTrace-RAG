@@ -8,7 +8,7 @@ M2 保留现有 `AutoPaperWorkflow`、BGE-M3、PyMuPDF 和 Chroma。Streamlit �
 | --- | --- | --- |
 | `GET /api/v1/health` | 数据库及外部密钥可用性 | 布尔状态，不返回密钥 |
 | `POST /api/v1/jobs` | 启动当前完整研究流程 | `202` 与持久化任务快照；已有任务执行时 `409` |
-| `GET /api/v1/jobs` | 最近任务，用于界面恢复 | 任务摘要列表 |
+| `GET /api/v1/jobs` | 最近任务，用于界面恢复 | 轻量任务摘要列表；点击后再取详情 |
 | `GET /api/v1/jobs/{job_id}` | 查询阶段、日志、结果和错误 | 任务快照 |
 | `POST /api/v1/jobs/{job_id}/cancel` | 请求阶段间协作式取消 | 任务快照 |
 | `GET /api/v1/papers` | 查询已登记论文 | 论文摘要 |
