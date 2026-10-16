@@ -20,7 +20,7 @@
 | QASPER dev 固定 10 题 | 10 篇、10 题，Chroma dense、Milvus dense/BM25/hybrid 四组均 10/10 完成。真实服务首次运行发现 PyMilvus 2.6 返回 `chunk_id` 主键而非 `id`，已修复并重跑 |
 | BGE cross-encoder 本机实测 | 权重约 2.27 GB；Hugging Face 下载速度实测约 1 MB/6.7 秒，尝试 Xet 和普通 HTTP 路径均未完成下载，已停止。因此目前只有模拟模型的单元测试，没有真实重排质量或延迟数据；上述四组结果均不包含重排 |
 | Docling 真实复杂 PDF | 接口和模拟 provenance 测试已通过；尚未安装 Docling 或用真实复杂版式 PDF 检验质量 |
-| 外部生成问答 | API 模型密钥配置可用；真实 DeepSeek 调用未执行，当前验收未获得将论文片段发往该第三方的明确授权 |
+| 外部生成问答 | 经用户明确授权，对《Attention Is All You Need》执行 1 次真实 DeepSeek 问答；`POST /api/v1/questions` 返回 200，回答和 2 条引用已写入本机 MySQL，证据读取接口返回 2 条 |
 
 固定 10 题的结果保存在 `evaluation/runs/m3_ablation_20261016_165804`，运行参数为 `--split dev --limit 10 --seed 42 --top-k 5 --candidate-k 20 --skip-reranker`：
 
@@ -34,6 +34,8 @@
 这些时间只计查询，不含模型加载、嵌入建库或生成。这个小样本上 hybrid 没有优于 dense，因此示例配置暂以 `dense` 为默认值；BM25 和 hybrid 保留为可切换策略，后续用更大的开发集及留出集复核。
 
 Milvus 的 `get_collection_stats().row_count` 在刚完成写入时曾滞后；验收用 `query(..., output_fields=["count(*)"])` 核对了实际可查询的 2,435 个片段，重启后结果相同。浏览器截图保存在本机被 Git 忽略的 `data/m3/m3_ui_milvus_smoke.png`。
+
+真实问答仅执行一次：对 `arxiv:1706.03762` 提问“原版 Transformer 的编码器和解码器各有多少层”，模型回答两者各有 6 层。保存的回答 ID 为 `73c4f897ee6a4ff2bc54bc08867118b0`；两条引用分别指向论文 PDF 第 3 页、`3.1 Encoder and Decoder Stacks` 中明确写有编码器和解码器 `N = 6` 的片段。随后通过 `/api/v1/answers/{answer_id}/evidence` 从本机 MySQL 回读到 2 条相同证据。此案例验证端到端链路，不能代替问答质量的批量评测。
 
 `evidence_recall_proxy` 沿用 M0 的词覆盖口径，并非 QASPER 官方 evidence F1。固定 10 题仅用于开发检查，不可写成质量提升或泛化结论。QASPER 是结构化全文，不提供原始 PDF 页码金标准；PDF 页码准确率需另建留出集。
 
