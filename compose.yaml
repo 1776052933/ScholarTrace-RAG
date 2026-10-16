@@ -20,9 +20,13 @@ services:
       ETCD_AUTO_COMPACTION_RETENTION: "1000"
       ETCD_QUOTA_BACKEND_BYTES: "4294967296"
       ETCD_SNAPSHOT_COUNT: "50000"
-    command: etcd -advertise-client-urls=http://milvus_etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    command: etcd -advertise-client-urls=http://milvus-etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
     volumes:
       - milvus_etcd_data:/etcd
+    networks:
+      default:
+        aliases:
+          - milvus-etcd
     healthcheck:
       test: ["CMD", "etcdctl", "endpoint", "health"]
       interval: 30s
@@ -36,6 +40,10 @@ services:
     command: minio server /minio_data --console-address ":9001"
     volumes:
       - milvus_minio_data:/minio_data
+    networks:
+      default:
+        aliases:
+          - milvus-minio
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 30s
@@ -47,8 +55,8 @@ services:
     security_opt:
       - seccomp:unconfined
     environment:
-      ETCD_ENDPOINTS: milvus_etcd:2379
-      MINIO_ADDRESS: milvus_minio:9000
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
       MQ_TYPE: woodpecker
     volumes:
       - milvus_data:/var/lib/milvus
@@ -75,9 +83,9 @@ services:
       RAG_VECTOR_BACKEND: milvus
       RAG_COLLECTION_NAME: ${RAG_COLLECTION_NAME:-paper_chunks_m3}
       MILVUS_URI: http://milvus:19530
-      RAG_RETRIEVAL_MODE: ${RAG_RETRIEVAL_MODE:-hybrid}
+      RAG_RETRIEVAL_MODE: ${RAG_RETRIEVAL_MODE:-dense}
       RAG_CANDIDATE_K: ${RAG_CANDIDATE_K:-20}
-      RAG_RERANKER_ENABLED: ${RAG_RERANKER_ENABLED:-true}
+      RAG_RERANKER_ENABLED: ${RAG_RERANKER_ENABLED:-false}
       RAG_PDF_PARSER_BACKEND: ${RAG_PDF_PARSER_BACKEND:-pymupdf}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}

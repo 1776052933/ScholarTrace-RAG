@@ -57,7 +57,8 @@ class FakeMilvus:
 
     def search(self, **kwargs):
         self.calls.append(("search", kwargs))
-        return [[self._hit(row, 0.9) for row in self.rows.values()
+        score = 7.45 if kwargs.get("anns_field") == "sparse" else 0.9
+        return [[self._hit(row, score) for row in self.rows.values()
                  if not kwargs.get("filter") or row["paper_id"] in kwargs["filter"]][:kwargs["limit"]]]
 
     def hybrid_search(self, **kwargs):
@@ -77,7 +78,7 @@ class FakeMilvus:
 
     @staticmethod
     def _hit(row, score):
-        return {"id": row["chunk_id"], "distance": score,
+        return {"chunk_id": row["chunk_id"], "distance": score,
                 "entity": {key: value for key, value in row.items() if key != "dense"}}
 
 
@@ -101,6 +102,10 @@ def test_milvus_schema_bm25_hybrid_version_and_readback():
     assert result[0]["metadata"]["retrieval_mode"] == "hybrid"
     assert len(fake.requests) == 2
     assert store.search([0.1, 0.2, 0.3], mode="dense")[0]["chunk_id"] == chunk.chunk_id
+    lexical_result = store.search(None, query_text="retrieval", mode="bm25")[0]
+    assert lexical_result["chunk_id"] == chunk.chunk_id
+    assert lexical_result["metadata"]["raw_retrieval_score"] == 7.45
+    assert 0 < lexical_result["score"] < 1
     lexical = MilvusVectorStore(client=fake, pipeline_signature="pages-v1")
     class NoDenseModel:
         def embed(self, _text):

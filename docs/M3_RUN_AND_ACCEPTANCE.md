@@ -1,4 +1,4 @@
-# M3 解析与检索：运行、评测与当前验收
+# M3 解析与检索：运行、评测与验收
 
 ## 本阶段做了什么
 
@@ -9,17 +9,31 @@
 - MySQL 新增 `papers.index_signature`。切到 Milvus 时，旧 Chroma 的 `COMPLETED` 论文展示 `REINDEX_REQUIRED`，问答返回 409，避免把不存在于新索引的论文当成可用。
 - 固定 QASPER 开发集的逐题消融脚本：Chroma dense → Chroma dense + rerank → Milvus dense → Milvus BM25 → Milvus hybrid/RRF → Milvus hybrid + rerank。所有路径使用同一清洗文本、同一 chunk 和同一 BGE-M3 向量。
 
-## 当前状态
+## 2026-10-16 本机验收
 
 | 检查 | 结果 |
 | --- | --- |
-| 新检索、重排、解析单元测试 | 已通过 |
-| M0–M2 回归 | 最终常规集 453 通过、22 跳过、3 个 slow 未运行；旧重建脚本接口回归已修复 |
-| Alembic M3 迁移 | 本机原生 MySQL 执行成功，revision `9f1a43cd621e`；27 篇旧论文中 16 篇曾标为已完成，索引签名均为空。真实 API 检查显示 16 篇 `REINDEX_REQUIRED`、旧论文问答 409 |
-| QASPER dev 固定 10 题 Chroma dense 对照 | 10/10 完成，证据召回代理 0.667；与 M1 记录相同 |
-| Milvus 服务端真实联调及完整消融 | 尚未运行。本机 Windows 无 Milvus 服务，Docker 按用户决定暂缓安装 |
-| BGE cross-encoder 本机实测 | 首次模型下载持续停滞，已中止；单元测试通过，但无可报告的质量/延迟数字 |
+| Docker 与 Milvus | Docker Desktop 4.95.0、WSL 2.7.13、Milvus 2.6.24、etcd、MinIO 已在本机启动并通过健康检查；Docker 数据位于 D 盘。首次真实启动修复了 Compose 中带下划线的存储服务主机名 |
+| 新检索、重排、解析单元测试及回归 | 当前 M3 API/检索针对性测试 7/7 通过；完整非慢速回归 453 通过、22 跳过、3 个 slow 未运行 |
+| Alembic M3 迁移和历史论文 | 原生 MySQL revision `9f1a43cd621e`。27 篇记录中，16 篇有完整资源的论文已重建到 `paper_chunks_m3`，2,435 个片段均可查询，16 个 MySQL 索引签名一致；其余 11 篇保持 `PENDING` |
+| API、界面和容器重启 | `/api/v1/health` 正常，`/api/v1/papers` 显示 16 篇 `COMPLETED`、11 篇 `PENDING`。Streamlit 浏览器实测能打开，显示研究 API 已连接、MySQL 可用。刷新并重启 Milvus 后，2,435 个片段及 dense/BM25 查询仍可用 |
+| QASPER dev 固定 10 题 | 10 篇、10 题，Chroma dense、Milvus dense/BM25/hybrid 四组均 10/10 完成。真实服务首次运行发现 PyMilvus 2.6 返回 `chunk_id` 主键而非 `id`，已修复并重跑 |
+| BGE cross-encoder 本机实测 | 权重约 2.27 GB；Hugging Face 下载速度实测约 1 MB/6.7 秒，尝试 Xet 和普通 HTTP 路径均未完成下载，已停止。因此目前只有模拟模型的单元测试，没有真实重排质量或延迟数据；上述四组结果均不包含重排 |
 | Docling 真实复杂 PDF | 接口和模拟 provenance 测试已通过；尚未安装 Docling 或用真实复杂版式 PDF 检验质量 |
+| 外部生成问答 | API 模型密钥配置可用；真实 DeepSeek 调用未执行，当前验收未获得将论文片段发往该第三方的明确授权 |
+
+固定 10 题的结果保存在 `evaluation/runs/m3_ablation_20261016_165804`，运行参数为 `--split dev --limit 10 --seed 42 --top-k 5 --candidate-k 20 --skip-reranker`：
+
+| 方法 | 成功题数 | 证据召回代理 | 查询 P50 |
+| --- | ---: | ---: | ---: |
+| Chroma dense | 10/10 | 0.667 | 0.146 秒 |
+| Milvus dense | 10/10 | 0.667 | 0.150 秒 |
+| Milvus BM25 | 10/10 | 0.313 | 0.007 秒 |
+| Milvus hybrid/RRF | 10/10 | 0.490 | 0.146 秒 |
+
+这些时间只计查询，不含模型加载、嵌入建库或生成。这个小样本上 hybrid 没有优于 dense，因此示例配置暂以 `dense` 为默认值；BM25 和 hybrid 保留为可切换策略，后续用更大的开发集及留出集复核。
+
+Milvus 的 `get_collection_stats().row_count` 在刚完成写入时曾滞后；验收用 `query(..., output_fields=["count(*)"])` 核对了实际可查询的 2,435 个片段，重启后结果相同。浏览器截图保存在本机被 Git 忽略的 `data/m3/m3_ui_milvus_smoke.png`。
 
 `evidence_recall_proxy` 沿用 M0 的词覆盖口径，并非 QASPER 官方 evidence F1。固定 10 题仅用于开发检查，不可写成质量提升或泛化结论。QASPER 是结构化全文，不提供原始 PDF 页码金标准；PDF 页码准确率需另建留出集。
 
@@ -32,7 +46,7 @@ python -m pip install -r requirements.txt
 python -m alembic -c alembic.ini upgrade head
 ```
 
-Milvus 可使用可连接的 2.6 服务；`compose.yaml` 已加入官方 2.6.24 对应的 etcd、MinIO、Standalone 服务配置。当前不需要为阅读代码安装 Docker。Milvus 官方目前不支持在原生 Windows 上运行 Lite；Windows 本地 Standalone 路径依赖 Docker/WSL，或连接远端 Milvus。参见[官方 Windows 部署](https://milvus.io/docs/install_standalone-windows.md)与[Milvus Lite 平台](https://milvus.io/docs/milvus_lite.md)。
+Milvus 可使用可连接的 2.6 服务；本机已通过 Docker/WSL 验证 `compose.yaml` 的 Milvus 2.6.24、etcd、MinIO 组合。只启动 Milvus 时执行 `docker compose --env-file .env.example up -d milvus`；其中 MySQL 占位密码不会用于这三个容器。启动完整 Compose 前应先创建本地 `.env` 并设置真实 MySQL 密码。Milvus 官方目前不支持在原生 Windows 上运行 Lite；Windows 本地 Standalone 路径依赖 Docker/WSL，或连接远端 Milvus。参见[官方 Windows 部署](https://milvus.io/docs/install_standalone-windows.md)与[Milvus Lite 平台](https://milvus.io/docs/milvus_lite.md)。
 
 将以下设置交给 API、重建脚本和界面进程使用，不能只设置在一个终端：
 
@@ -40,9 +54,9 @@ Milvus 可使用可连接的 2.6 服务；`compose.yaml` 已加入官方 2.6.24 
 $env:RAG_VECTOR_BACKEND = "milvus"
 $env:RAG_COLLECTION_NAME = "paper_chunks_m3"
 $env:MILVUS_URI = "http://127.0.0.1:19530"
-$env:RAG_RETRIEVAL_MODE = "hybrid"
+$env:RAG_RETRIEVAL_MODE = "dense"
 $env:RAG_CANDIDATE_K = "20"
-$env:RAG_RERANKER_ENABLED = "true"
+$env:RAG_RERANKER_ENABLED = "false"
 ```
 
 旧论文必须重新向量化入库，不能直接复制 Chroma 索引：

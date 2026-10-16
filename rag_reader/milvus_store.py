@@ -265,23 +265,30 @@ class MilvusVectorStore:
         results = []
         for hit in raw[0] if raw else []:
             entity = hit.get("entity") or {}
-            score = float(hit.get("distance", hit.get("score", 0.0)))
-            if not math.isfinite(score):
+            chunk_id = hit.get("chunk_id", hit.get("id"))
+            if chunk_id is None:
+                raise KeyError("Milvus search result has no primary key")
+            raw_score = float(hit.get("distance", hit.get("score", 0.0)))
+            if not math.isfinite(raw_score):
                 continue
+            score = (
+                max(0.0, raw_score) / (1.0 + max(0.0, raw_score))
+                if mode == "bm25" else max(0.0, min(1.0, raw_score))
+            )
             metadata = dict(entity.get("metadata") or {})
             metadata.update({
                 "paper_id": entity.get("paper_id"),
                 "page": entity.get("page") or None,
                 "section": entity.get("section") or "",
                 "retrieval_mode": mode,
-                "raw_retrieval_score": score,
+                "raw_retrieval_score": raw_score,
             })
             results.append({
-                "chunk_id": str(hit["id"]),
+                "chunk_id": str(chunk_id),
                 "text": entity.get("text") or "",
                 "metadata": metadata,
-                "distance": 1.0 - max(0.0, min(1.0, score)),
-                "score": max(0.0, min(1.0, score)),
+                "distance": 1.0 - score,
+                "score": score,
             })
         return results
 
