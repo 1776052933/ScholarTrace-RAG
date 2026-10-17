@@ -73,6 +73,16 @@ services:
         condition: service_healthy
       milvus_minio:
         condition: service_healthy
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
   api:
     build:
       context: .
@@ -87,20 +97,70 @@ services:
       RAG_CANDIDATE_K: ${RAG_CANDIDATE_K:-20}
       RAG_RERANKER_ENABLED: ${RAG_RERANKER_ENABLED:-false}
       RAG_PDF_PARSER_BACKEND: ${RAG_PDF_PARSER_BACKEND:-pymupdf}
+      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-BAAI/bge-m3}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
       OPENALEX_API_KEY: ${OPENALEX_API_KEY:-}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      CELERY_BROKER_URL: redis://redis:6379/0
     volumes:
       - ./data/m2:/app/data/m2
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${SCHOLARTRACE_API_PORT:-8000}:8000"
     depends_on:
       mysql:
         condition: service_healthy
       milvus:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=5)"]
+      interval: 15s
+      start_period: 60s
+      timeout: 8s
+      retries: 5
     command: ["sh", "-c", "python -m alembic -c alembic.ini upgrade head && python -m uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --workers 1"]
+  worker:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    environment:
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-scholartrace}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-scholartrace}?charset=utf8mb4
+      AUTO_PAPER_DATA_ROOT: /app/data/m2
+      CELERY_BROKER_URL: redis://redis:6379/0
+      RAG_VECTOR_BACKEND: milvus
+      RAG_COLLECTION_NAME: ${RAG_COLLECTION_NAME:-paper_chunks_m3}
+      MILVUS_URI: http://milvus:19530
+      RAG_RETRIEVAL_MODE: ${RAG_RETRIEVAL_MODE:-dense}
+      RAG_CANDIDATE_K: ${RAG_CANDIDATE_K:-20}
+      RAG_RERANKER_ENABLED: ${RAG_RERANKER_ENABLED:-false}
+      RAG_PDF_PARSER_BACKEND: ${RAG_PDF_PARSER_BACKEND:-pymupdf}
+      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-BAAI/bge-m3}
+      SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
+      OPENALEX_API_KEY: ${OPENALEX_API_KEY:-}
+    volumes:
+      - ./data/m2:/app/data/m2
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["python", "-m", "celery", "-A", "app.tasks:celery_app", "worker", "--loglevel=INFO", "--concurrency=1"]
+  beat:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    environment:
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-scholartrace}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-scholartrace}?charset=utf8mb4
+      AUTO_PAPER_DATA_ROOT: /app/data/m2
+      CELERY_BROKER_URL: redis://redis:6379/0
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["python", "-m", "celery", "-A", "app.tasks:celery_app", "beat", "--loglevel=INFO", "--schedule=/tmp/scholartrace-celerybeat"]
   ui:
     build:
       context: .
@@ -108,12 +168,20 @@ services:
     environment:
       AUTO_PAPER_API_URL: http://api:8000
     ports:
-      - "127.0.0.1:8501:8501"
+      - "127.0.0.1:${SCHOLARTRACE_UI_PORT:-8501}:8501"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=5)"]
+      interval: 15s
+      start_period: 60s
+      timeout: 8s
+      retries: 5
     command: ["python", "-m", "streamlit", "run", "Auto_Paper_UI/ui_app.py", "--server.address=0.0.0.0", "--server.port=8501"]
 volumes:
   mysql_data:
   milvus_etcd_data:
   milvus_minio_data:
   milvus_data:
+  redis_data:

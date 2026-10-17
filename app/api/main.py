@@ -6,12 +6,17 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from sqlalchemy import select, text
 
-from app.api.schemas import JobListItem, JobSnapshot, PaperSummary, QuestionRequest, QuestionResponse, ResearchOptions
+from app.api.schemas import (
+    IngestionRequest, JobListItem, JobSnapshot, MultiPaperQuestionRequest,
+    MultiPaperQuestionResponse, PaperSummary, QuestionRequest, QuestionResponse,
+    ResearchOptions,
+)
 from app.config import ModelSettings
 from app.services.jobs import JobBusyError, ResearchJobRunner
+from app.services.ingestions import IngestionConflictError, IngestionJobService
 from app.services.questions import QuestionService, PaperIndexUnavailableError
 from rag_reader.config import RAGSettings
 from rag_reader.store_factory import milvus_index_scope
@@ -26,12 +31,14 @@ def create_app(
     data_root: str | Path | None = None,
     workflow_factory: Callable[[ResearchOptions], Any] | None = None,
     question_service: Any | None = None,
+    ingestion_dispatcher: Callable[[str], None] | None = None,
 ) -> FastAPI:
     root = Path(data_root or os.getenv("AUTO_PAPER_DATA_ROOT", "data/m2")).resolve()
     if database_url is None:
         database_url = os.getenv("DATABASE_URL") or f"sqlite:///{(root / 'app.sqlite3').as_posix()}"
     database = DatabaseManager(database_url)
     runner = ResearchJobRunner(database, root, workflow_factory=workflow_factory)
+    ingestions = IngestionJobService(database, root, dispatch=ingestion_dispatcher)
     questions = question_service or QuestionService(database, root)
 
     @asynccontextmanager
@@ -46,9 +53,10 @@ def create_app(
         yield
         database.dispose()
 
-    app = FastAPI(title="ScholarTrace Research API", version="2.0.0", lifespan=lifespan)
+    app = FastAPI(title="ScholarTrace Research API", version="4.0.0", lifespan=lifespan)
     app.state.database = database
     app.state.runner = runner
+    app.state.ingestions = ingestions
     app.state.questions = questions
     app.state.data_root = root
 
@@ -89,9 +97,28 @@ def create_app(
     @app.post("/api/v1/jobs/{job_id}/cancel", response_model=JobSnapshot)
     def cancel_job(job_id: str) -> JobSnapshot:
         try:
-            return runner.cancel(job_id)
+            snapshot = runner.store.get(job_id)
+            return ingestions.cancel(job_id) if snapshot.job_type == "ingestion" else runner.cancel(job_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
+
+    @app.post("/api/v1/ingestions", response_model=JobSnapshot, status_code=202)
+    def start_ingestion(request: IngestionRequest) -> JobSnapshot:
+        try:
+            return ingestions.create(request)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="discovery job not found") from exc
+        except IngestionConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/v1/ingestions/{job_id}/retry", response_model=JobSnapshot, status_code=202)
+    def retry_ingestion(job_id: str) -> JobSnapshot:
+        try:
+            return ingestions.retry(job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="ingestion job not found") from exc
+        except IngestionConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/v1/papers", response_model=list[PaperSummary])
     def list_papers(limit: int = 100) -> list[PaperSummary]:
@@ -125,12 +152,30 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return QuestionResponse(answer_id=answer_id, paper_id=request.paper_id, answer=answer)
 
+    @app.post("/api/v1/questions/multi", response_model=MultiPaperQuestionResponse)
+    def ask_multiple_questions(request: MultiPaperQuestionRequest) -> MultiPaperQuestionResponse:
+        try:
+            answer_id, answer = questions.ask_many(request.paper_ids, request.question)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"paper not found: {exc}") from exc
+        except PaperIndexUnavailableError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return MultiPaperQuestionResponse(answer_id=answer_id, paper_ids=request.paper_ids, answer=answer)
+
     @app.get("/api/v1/answers/{answer_id}/evidence", response_model=list[dict[str, Any]])
     def get_evidence(answer_id: str) -> list[dict[str, Any]]:
         try:
             return questions.evidence(answer_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="answer not found") from exc
+
+    @app.get("/api/v1/answers/{answer_id}/export")
+    def export_answer(answer_id: str) -> Response:
+        try:
+            report = questions.export(answer_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="answer not found") from exc
+        return Response(content=report, media_type="text/markdown; charset=utf-8")
 
     return app
 

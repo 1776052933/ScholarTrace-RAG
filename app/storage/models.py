@@ -20,6 +20,7 @@ class ResearchJobModel(Base):
     job_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     query: Mapped[str] = mapped_column(Text, nullable=False)
     options: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    job_type: Mapped[str] = mapped_column(String(24), nullable=False, default="research", index=True)
     status: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
     stage: Mapped[str | None] = mapped_column(String(80), nullable=True)
     progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -40,6 +41,16 @@ class QuestionAnswerModel(Base):
 
     answer_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     paper_id: Mapped[str] = mapped_column(String(255), ForeignKey("papers.paper_id", ondelete="CASCADE"), nullable=False, index=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now)
+
+
+class MultiPaperAnswerModel(Base):
+    __tablename__ = "multi_paper_answers"
+
+    answer_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    paper_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     question: Mapped[str] = mapped_column(Text, nullable=False)
     answer: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now)

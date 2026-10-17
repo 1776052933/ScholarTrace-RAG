@@ -84,6 +84,42 @@ def recent_workflows(limit: int = 10) -> list[dict[str, Any]]:
     return list(_request("GET", f"/api/v1/jobs?limit={limit}"))
 
 
+def start_selected_ingestion(
+    discovery_job_id: str, paper_ids: list[str], *,
+    download_engine: str = "academic_oa", download_timeout: int = 30,
+) -> dict[str, Any]:
+    return dict(_request("POST", "/api/v1/ingestions", payload={
+        "discovery_job_id": discovery_job_id,
+        "paper_ids": paper_ids,
+        "download_engine": download_engine,
+        "download_timeout": download_timeout,
+    }))
+
+
+def retry_selected_ingestion(job_id: str) -> dict[str, Any]:
+    return dict(_request("POST", f"/api/v1/ingestions/{job_id}/retry"))
+
+
+def paper_library(limit: int = 200) -> list[dict[str, Any]]:
+    return list(_request("GET", f"/api/v1/papers?limit={limit}"))
+
+
+def ask_multiple_papers(paper_ids: list[str], question: str) -> dict[str, Any]:
+    return dict(_request("POST", "/api/v1/questions/multi", payload={
+        "paper_ids": paper_ids, "question": question,
+    }, timeout=240.0))
+
+
+def export_answer(answer_id: str) -> str:
+    try:
+        with httpx.Client(base_url=_base_url(), timeout=15.0) as client:
+            response = client.get(f"/api/v1/answers/{answer_id}/export")
+            response.raise_for_status()
+            return response.text
+    except (httpx.HTTPError, ValueError) as exc:
+        raise WorkflowRunError(f"无法导出问答：{exc}") from exc
+
+
 def ask_paper_question(paper_id: str, question: str, *, deepseek_api_key: str | None = None) -> dict[str, Any]:
     if deepseek_api_key:
         raise WorkflowRunError("M2 的模型密钥在 API 服务端配置")

@@ -88,6 +88,7 @@ class JobStore:
                 job_id=job_id,
                 query=options.query,
                 options=options.model_dump(mode="json"),
+                job_type="research",
                 status="queued",
                 progress=0,
                 logs=[],
@@ -111,6 +112,7 @@ class JobStore:
             rows = session.execute(
                 select(
                     ResearchJobModel.job_id,
+                    ResearchJobModel.job_type,
                     ResearchJobModel.query,
                     ResearchJobModel.status,
                     ResearchJobModel.stage,
@@ -127,6 +129,7 @@ class JobStore:
             ).all()
             return [JobListItem(
                 job_id=row.job_id,
+                job_type=row.job_type,
                 query=row.query,
                 status=row.status,
                 stage=row.stage,
@@ -183,7 +186,7 @@ class JobStore:
         with self.database.get_session() as session:
             result = session.execute(
                 update(ResearchJobModel)
-                .where(ResearchJobModel.status.in_(tuple(_ACTIVE)))
+                .where(ResearchJobModel.status.in_(tuple(_ACTIVE)), ResearchJobModel.job_type == "research")
                 .values(status="interrupted", error="API 服务重启，运行中的任务已中断。", retryable=True, finished_at=utc_now(), updated_at=utc_now())
             )
             session.commit()
@@ -195,6 +198,7 @@ class JobStore:
         start = row.started_at or row.created_at
         return JobSnapshot(
             job_id=row.job_id,
+            job_type=row.job_type,
             query=row.query,
             status=row.status,
             stage=row.stage,

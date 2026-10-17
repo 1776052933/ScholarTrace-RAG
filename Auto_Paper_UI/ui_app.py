@@ -20,10 +20,15 @@ from api_client import (
     RunOptions,
     WorkflowRunError,
     api_status,
+    ask_multiple_papers,
     ask_paper_question,
     cancel_workflow,
+    export_answer,
+    paper_library,
     poll_workflow,
     recent_workflows,
+    retry_selected_ingestion,
+    start_selected_ingestion,
     start_workflow,
 )
 from reporting import (
@@ -194,7 +199,11 @@ def render_controls() -> tuple[RunOptions, bool]:
     )
 
     st.sidebar.markdown("### 处理功能")
-    download_papers = st.sidebar.toggle("下载论文 PDF", value=True)
+    choose_candidates = st.sidebar.toggle(
+        "先看候选，再选择入库", value=True,
+        help="先完成论文检索和排序，再勾选要下载与入库的论文。",
+    )
+    download_papers = st.sidebar.toggle("下载论文 PDF", value=not choose_candidates, disabled=choose_candidates)
     enable_rag_widget = st.sidebar.toggle(
         "启用 RAG 阅读",
         value=True,
@@ -304,6 +313,7 @@ def execute(options: RunOptions) -> None:
         return
 
     st.session_state["active_workflow_job_id"] = job_id
+    st.session_state["last_workflow_job_id"] = job_id
     st.session_state.pop("result", None)
     st.session_state.pop("output_path", None)
     st.session_state.pop("log_path", None)
@@ -337,6 +347,8 @@ def _store_workflow_result(snapshot: dict[str, Any]) -> None:
 
 
 def _record_finished_workflow(snapshot: dict[str, Any]) -> None:
+    if snapshot.get("job_id") and snapshot.get("job_type", "research") == "research":
+        st.session_state["last_workflow_job_id"] = snapshot["job_id"]
     status = snapshot.get("status")
     if isinstance(snapshot.get("result"), dict):
         _store_workflow_result(snapshot)
@@ -452,6 +464,9 @@ def render_result(
     metric_columns[2].metric("Top 论文", f"{len(papers)} 篇")
     metric_columns[3].metric("下载成功", f"{downloaded_count} 篇")
     metric_columns[4].metric("总耗时", format_duration(result.get("elapsed_seconds", 0)))
+
+    if literature_result.get("download_enabled") is False:
+        render_candidate_selection(result)
 
     paper_tab, graph_tab, reader_tab, overview_tab, export_tab = st.tabs([
         "Top 论文",
@@ -1395,12 +1410,123 @@ def render_recent_jobs() -> None:
             except WorkflowRunError as exc:
                 st.error(str(exc))
                 return
+            if selected.get("job_type") == "ingestion":
+                st.session_state["last_ingestion_job_id"] = selected["job_id"]
+                st.rerun()
             if selected["status"] in {"queued", "running", "cancelling"}:
                 st.session_state["active_workflow_job_id"] = selected["job_id"]
             else:
                 st.session_state.pop("active_workflow_job_id", None)
                 _record_finished_workflow(selected)
             st.rerun()
+
+
+def render_candidate_selection(result: dict[str, Any]) -> None:
+    candidates = ranked_papers(result)
+    source_id = st.session_state.get("last_workflow_job_id")
+    with st.container(border=True):
+        st.markdown("### 选择要阅读的论文")
+        st.caption("检索与排序已完成。选定后后台下载 PDF、解析并写入论文库。")
+        if not candidates or not source_id:
+            st.info("没有可选论文，或检索任务 ID 尚未恢复。")
+            return
+        by_id = {str(item.get("paper_id")): item for item in candidates if item.get("paper_id")}
+        labels = {paper_id: str(paper.get("title") or paper_id) for paper_id, paper in by_id.items()}
+        selected = st.multiselect(
+            "候选论文", list(by_id),
+            default=list(by_id)[: min(3, len(by_id))],
+            format_func=lambda paper_id: labels[paper_id],
+            key=f"select_papers_{source_id}",
+        )
+        if st.button("下载并建立论文库", disabled=not selected, type="primary"):
+            try:
+                snapshot = start_selected_ingestion(str(source_id), selected)
+            except WorkflowRunError as exc:
+                st.error(str(exc))
+            else:
+                st.session_state["last_ingestion_job_id"] = snapshot["job_id"]
+                st.rerun()
+
+
+@st.fragment(run_every=2.0)
+def render_ingestion_job() -> None:
+    job_id = st.session_state.get("last_ingestion_job_id")
+    if not job_id:
+        return
+    try:
+        snapshot = poll_workflow(str(job_id))
+    except WorkflowRunError as exc:
+        st.warning(f"暂时无法查询入库进度：{exc}")
+        return
+    with st.container(border=True):
+        st.markdown("### 论文入库进度")
+        status = str(snapshot.get("status") or "queued")
+        st.caption(f"任务 {str(job_id)[:8]} · {JOB_STATUS_LABELS.get(status, status)} · 刷新页面后可从最近任务恢复")
+        st.progress(int(snapshot.get("progress") or 0))
+        papers = (snapshot.get("result") or {}).get("papers") or []
+        if papers:
+            st.dataframe([{
+                "论文": item.get("title") or item.get("paper_id"),
+                "状态": JOB_STATUS_LABELS.get(str(item.get("status")), str(item.get("status"))),
+                "尝试次数": item.get("attempts", 0),
+                "片段数": item.get("chunk_count", 0),
+                "说明": item.get("error") or "",
+            } for item in papers], hide_index=True, use_container_width=True)
+        if snapshot.get("error"):
+            st.warning(str(snapshot["error"]))
+        if snapshot.get("retryable") and status in {"failed", "partial_success", "interrupted", "cancelled", "queued"}:
+            if st.button("重试未完成论文", key=f"retry_ingestion_{job_id}"):
+                try:
+                    retry_selected_ingestion(str(job_id))
+                except WorkflowRunError as exc:
+                    st.error(str(exc))
+                else:
+                    st.rerun()
+        if status in {"running", "queued"}:
+            st.caption("处理在后台继续运行。")
+
+
+def render_library() -> None:
+    if not st.session_state.get("api_connected"):
+        return
+    with st.expander("论文库 · 多篇证据问答", expanded=False):
+        try:
+            papers = paper_library()
+        except WorkflowRunError as exc:
+            st.warning(str(exc))
+            return
+        ready = {str(item["paper_id"]): item for item in papers
+                 if item.get("embedding_status") == "COMPLETED"}
+        st.caption(f"已入库且可问答：{len(ready)} 篇。请选择 2–5 篇进行跨论文提问。")
+        if not ready:
+            st.info("论文库暂无可问答论文。")
+            return
+        selected = st.multiselect(
+            "论文库", list(ready),
+            format_func=lambda paper_id: str(ready[paper_id].get("title") or paper_id),
+            key="library_multi_papers", max_selections=5,
+        )
+        question = st.text_input("跨论文问题", key="library_multi_question")
+        if st.button("根据所选论文回答", disabled=len(selected) < 2 or not question.strip()):
+            try:
+                st.session_state["multi_paper_answer"] = ask_multiple_papers(selected, question.strip())
+            except WorkflowRunError as exc:
+                st.error(str(exc))
+        response = st.session_state.get("multi_paper_answer")
+        if isinstance(response, dict):
+            answer = response.get("answer") or {}
+            st.markdown(str(answer.get("answer") or "根据提供的论文片段无法确定。"))
+            for citation in answer.get("citations") or []:
+                if isinstance(citation, dict):
+                    with st.expander(f"{citation.get('title') or citation.get('paper_id')} · 第 {citation.get('page') or '?'} 页"):
+                        st.write(citation.get("excerpt") or "")
+            try:
+                report = export_answer(str(response["answer_id"]))
+            except WorkflowRunError as exc:
+                st.warning(str(exc))
+            else:
+                st.download_button("导出本次问答", report.encode("utf-8"),
+                                   file_name="scholartrace_multi_paper_answer.md", mime="text/markdown")
 
 
 def main() -> None:
@@ -1415,12 +1541,14 @@ def main() -> None:
         else:
             execute(options)
     render_active_workflow()
+    render_ingestion_job()
     render_workflow_notice()
     result = st.session_state.get("result")
     if isinstance(result, dict):
         render_result(result)
     else:
         render_empty_state()
+    render_library()
 
 
 if __name__ == "__main__":

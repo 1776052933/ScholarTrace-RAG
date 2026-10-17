@@ -4,7 +4,7 @@ import json
 import logging
 import re
 from threading import Lock
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 
 from pydantic import ValidationError
 
@@ -45,6 +45,29 @@ class PaperQA:
         paper_id = _required_text(paper_id, "paper_id")
         question = _required_text(question, "question")
         chunks = self.retriever.retrieve(paper_id, question, top_k=self.top_k)
+        return self._answer({"paper_id": paper_id}, question, chunks)
+
+    def ask_many(self, paper_ids: Sequence[str], question: str) -> RAGAnswer:
+        """Answer using a shared Top-K across several already indexed papers."""
+        ids = [_required_text(value, "paper_id") for value in paper_ids]
+        if len(ids) < 2 or len(ids) != len(set(ids)):
+            raise ValueError("ask_many requires at least two distinct paper IDs")
+        question = _required_text(question, "question")
+        chunks = self.retriever.retrieve_multiple(ids, question, top_k=self.top_k)
+        # A global Top-K can contain only one paper; comparisons need evidence
+        # from every selected paper when it is present in the index.
+        present = {chunk.paper_id for chunk in chunks}
+        seen = {chunk.chunk_id for chunk in chunks}
+        for paper_id in ids:
+            if paper_id in present:
+                continue
+            for chunk in self.retriever.retrieve(paper_id, question, top_k=1):
+                if chunk.chunk_id not in seen:
+                    chunks.append(chunk)
+                    seen.add(chunk.chunk_id)
+        return self._answer({"paper_ids": ids}, question, chunks)
+
+    def _answer(self, scope: dict[str, Any], question: str, chunks: Sequence[Any]) -> RAGAnswer:
         if not chunks:
             return RAGAnswer(
                 question=question,
@@ -54,7 +77,7 @@ class PaperQA:
             )
 
         payload = {
-            "paper_id": paper_id,
+            **scope,
             "question": question,
             "chunks": [
                 {
@@ -68,7 +91,7 @@ class PaperQA:
             ],
         }
         client = self._get_client()
-        logger.info("调用 DeepSeek 论文问答：paper_id=%s, chunks=%d", paper_id, len(chunks))
+        logger.info("调用 DeepSeek 论文问答：scope=%s, chunks=%d", scope, len(chunks))
         content = client.chat(
             build_messages(RAG_QA_PROMPT, payload),
             temperature=0.0,
@@ -102,8 +125,8 @@ class PaperQA:
                 data["confidence"] = min(float(data.get("confidence") or 0.0), 0.5)
             return RAGAnswer.model_validate(data)
         except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
-            logger.warning("DeepSeek 论文问答 JSON 解析失败：paper_id=%s", paper_id)
-            raise RAGAnswerParseError(f"invalid RAG answer JSON for paper {paper_id}") from exc
+            logger.warning("DeepSeek 论文问答 JSON 解析失败：scope=%s", scope)
+            raise RAGAnswerParseError("invalid RAG answer JSON") from exc
 
     def _get_client(self) -> DeepSeekClient:
         client = self.llm_client

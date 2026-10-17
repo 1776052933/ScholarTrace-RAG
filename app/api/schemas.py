@@ -50,6 +50,7 @@ JobStatus = Literal["queued", "running", "cancelling", "completed", "partial_suc
 
 class JobSnapshot(BaseModel):
     job_id: str
+    job_type: Literal["research", "ingestion"] = "research"
     query: str
     status: JobStatus
     stage: str | None = None
@@ -65,6 +66,7 @@ class JobSnapshot(BaseModel):
 
 class JobListItem(BaseModel):
     job_id: str
+    job_type: Literal["research", "ingestion"] = "research"
     query: str
     status: JobStatus
     stage: str | None = None
@@ -85,6 +87,42 @@ class QuestionRequest(BaseModel):
 class QuestionResponse(BaseModel):
     answer_id: str
     paper_id: str
+    answer: dict[str, Any]
+
+
+class IngestionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    discovery_job_id: str = Field(min_length=32, max_length=32)
+    paper_ids: list[str] = Field(min_length=1, max_length=20)
+    download_engine: Literal["academic_oa", "auto", "arxiv", "openalex", "crossref", "scholar"] = "academic_oa"
+    download_timeout: int = Field(default=30, ge=10, le=300)
+
+    @field_validator("paper_ids")
+    @classmethod
+    def unique_ids(cls, values: list[str]) -> list[str]:
+        cleaned = [value.strip() for value in values]
+        if any(not value or len(value) > 255 for value in cleaned) or len(set(cleaned)) != len(cleaned):
+            raise ValueError("paper_ids must be distinct non-empty IDs of at most 255 characters")
+        return cleaned
+
+
+class MultiPaperQuestionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    paper_ids: list[str] = Field(min_length=2, max_length=5)
+    question: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("paper_ids")
+    @classmethod
+    def unique_ids(cls, values: list[str]) -> list[str]:
+        cleaned = [value.strip() for value in values]
+        if any(not value or len(value) > 255 for value in cleaned) or len(set(cleaned)) != len(cleaned):
+            raise ValueError("paper_ids must be distinct non-empty IDs of at most 255 characters")
+        return cleaned
+
+
+class MultiPaperQuestionResponse(BaseModel):
+    answer_id: str
+    paper_ids: list[str]
     answer: dict[str, Any]
 
 

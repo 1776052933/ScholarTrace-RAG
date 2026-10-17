@@ -177,3 +177,8 @@ M1 已完成逐页 PDF 入库与结构化引用、BGE-M3 失败显式报错、�
 ## M3 当前进度（2026-10-17）
 
 已加入 Milvus 2.6 dense/BM25/RRF 索引适配、可选 BGE cross-encoder 片段重排、Docling 复杂 PDF 解析路径和论文索引版本字段。本机 MySQL 迁移、旧索引拦截、Milvus 服务端联调、六服务 Compose 启动与重启持久性已验证。QASPER dev 固定 30 题的六路检索消融全部完成；默认 BGE 重排在开发样本上改善证据召回代理，但 CPU 延迟显著增加，因此默认关闭。十篇 PDF 的首轮标注、解析及 22 题问答对照也已完成；金标准尚待独立复核，扫描件未覆盖。详见 [M3 运行与验收](M3_RUN_AND_ACCEPTANCE.md)及[Docling 质量对照](M3_DOCLING_QUALITY_LABELING.md)。
+
+
+## M4 当前进度（2026-10-17）
+
+已实现 Redis/Celery 选文入库、MySQL 逐篇持久化状态、幂等提交、失败重试、心跳与中断恢复、Streamlit 候选选择与进度、多论文证据问答和 Markdown 导出。九服务 Compose、两篇真实 PDF 入库、解析失败后重试、API/worker 重启持久化、真实 Milvus 多论文检索及界面连接 API 均已验收。生成质量本轮只做无外部模型的契约测试，后续在固定多论文问题集评估；浏览器视觉布局仍待人工走查。详见 [M4 运行与验收](M4_RUN_AND_ACCEPTANCE.md)。
