@@ -1436,6 +1436,7 @@ def render_candidate_selection(result: dict[str, Any]) -> None:
             "候选论文", list(by_id),
             default=list(by_id)[: min(3, len(by_id))],
             format_func=lambda paper_id: labels[paper_id],
+            placeholder="请选择要下载的论文",
             key=f"select_papers_{source_id}",
         )
         if st.button("下载并建立论文库", disabled=not selected, type="primary"):
@@ -1504,6 +1505,7 @@ def render_library() -> None:
         selected = st.multiselect(
             "论文库", list(ready),
             format_func=lambda paper_id: str(ready[paper_id].get("title") or paper_id),
+            placeholder="请选择 2–5 篇论文",
             key="library_multi_papers", max_selections=5,
         )
         question = st.text_input("跨论文问题", key="library_multi_question")

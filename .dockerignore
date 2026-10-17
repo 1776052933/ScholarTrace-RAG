@@ -6,6 +6,7 @@ API_key/API_key.json
 __pycache__
 .pytest_cache
 data
+tmp
 papers
 Auto_Paper_UI/runtime
 Auto_Paper_UI/outputs

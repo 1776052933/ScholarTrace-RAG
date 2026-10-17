@@ -181,4 +181,4 @@ M1 已完成逐页 PDF 入库与结构化引用、BGE-M3 失败显式报错、�
 
 ## M4 当前进度（2026-10-17）
 
-已实现 Redis/Celery 选文入库、MySQL 逐篇持久化状态、幂等提交、失败重试、心跳与中断恢复、Streamlit 候选选择与进度、多论文证据问答和 Markdown 导出。九服务 Compose、两篇真实 PDF 入库、解析失败后重试、API/worker 重启持久化、真实 Milvus 多论文检索及界面连接 API 均已验收。生成质量本轮只做无外部模型的契约测试，后续在固定多论文问题集评估；浏览器视觉布局仍待人工走查。详见 [M4 运行与验收](M4_RUN_AND_ACCEPTANCE.md)。
+已实现 Redis/Celery 选文入库、MySQL 逐篇持久化状态、幂等提交、失败重试、心跳与中断恢复、Streamlit 候选选择与进度、多论文证据问答和 Markdown 导出。九服务 Compose、两篇真实 PDF 入库、真实下载失败与解析失败、失败重试、API/worker 重启持久化、真实 Milvus/DeepSeek 跨论文问答、答案导出及桌面浏览器布局均已验收，M4 功能收口完成。回答质量仍需在 M6 固定多论文问题集评估；当前一次真实问答提示证据片段不足以完整回答架构细节。详见 [M4 运行与验收](M4_RUN_AND_ACCEPTANCE.md)。
