@@ -58,12 +58,15 @@ def main() -> None:
     parser.add_argument("--candidate-k", type=int, default=20)
     parser.add_argument("--milvus-uri", default=os.getenv("MILVUS_URI", "http://127.0.0.1:19530"))
     parser.add_argument("--collection", default="m3_qasper_dev")
+    parser.add_argument("--embedding-model", default=os.getenv("RAG_EMBEDDING_MODEL", "BAAI/bge-m3"))
+    parser.add_argument("--embedding-batch-size", type=int, default=int(os.getenv("RAG_EMBEDDING_BATCH_SIZE", "32")))
+    parser.add_argument("--reranker-model", default=os.getenv("RAG_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3"))
     parser.add_argument("--skip-milvus", action="store_true")
     parser.add_argument("--skip-reranker", action="store_true")
     parser.add_argument("--run-dir", type=Path)
     args = parser.parse_args()
-    if args.limit < 0 or args.top_k < 1 or args.candidate_k < args.top_k:
-        parser.error("limit >= 0 and candidate-k >= top-k >= 1 are required")
+    if args.limit < 0 or args.top_k < 1 or args.candidate_k < args.top_k or args.embedding_batch_size < 1:
+        parser.error("limit >= 0, candidate-k >= top-k >= 1 and embedding-batch-size >= 1 are required")
     dataset = DATA / "qasper" / f"qasper-{args.split}-v0.3.json"
     if not dataset.is_file():
         parser.error(f"Missing QASPER dataset: {dataset}")
@@ -77,7 +80,7 @@ def main() -> None:
         parser.error(f"Run directory is not empty: {run_dir}")
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    model = EmbeddingModel()
+    model = EmbeddingModel(model_name=args.embedding_model, batch_size=args.embedding_batch_size)
     require_real_embedding(model)
     fingerprint = embedding_fingerprint(model)
     splitter = DocumentSplitter()
@@ -88,7 +91,7 @@ def main() -> None:
         token=os.getenv("MILVUS_TOKEN"),
         pipeline_signature=f"qasper-structured-{splitter.chunk_size}-{splitter.chunk_overlap}-v1",
     )
-    reranker = None if args.skip_reranker else CrossEncoderReranker()
+    reranker = None if args.skip_reranker else CrossEncoderReranker(model_name=args.reranker_model)
     variants: dict[str, PaperRetriever] = {
         "chroma_dense": PaperRetriever(model, chroma, default_top_k=args.top_k),
     }
@@ -120,8 +123,10 @@ def main() -> None:
         "split": args.split, "seed": args.seed, "limit": args.limit,
         "question_ids": [row["question_id"] for _, row in selected],
         "embedding_model": model.model_name,
+        "embedding_batch_size": model.batch_size,
         "embedding_revision": embedding_revision(model),
         "embedding_fingerprint": fingerprint,
+        "reranker_model": args.reranker_model if reranker is not None else None,
         "chunk_size": splitter.chunk_size, "chunk_overlap": splitter.chunk_overlap,
         "top_k": args.top_k, "candidate_k": args.candidate_k,
         "variants": list(variants), "milvus_collection": args.collection if milvus else None,

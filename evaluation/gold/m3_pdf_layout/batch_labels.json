@@ -1,0 +1,144 @@
+{
+  "schema_version": "m3-pdf-layout-batch-labels-v1",
+  "annotation_method": "First-pass visual review of contact sheets for every PDF page, with original page renders and PDF text used to verify selected table rows. No Docling output was consulted when selecting tables or questions.",
+  "review_status": "first_pass_needs_independent_second_review",
+  "table_definition": "A data grid with rows and columns; figure panels and algorithm pseudocode are excluded.",
+  "documents": [
+    {
+      "id": "mediqa_wv", "pdf_sha256": "3b38176e775cd5a71377574154c040135dc2528b708e50953c517ec201dfdc71", "page_count": 11,
+      "tables": [
+        {"id": "table_1", "page": 4, "caption_prefix": "Table 1", "row_checks": [{"row_contains": "Train", "values": ["279", "449"]}]},
+        {"id": "table_2", "page": 7, "caption_prefix": "Table 2", "row_checks": []},
+        {"id": "table_3", "page": 7, "caption_prefix": "Table 3", "row_checks": [{"row_contains": "LLaMA-4 + RAG (image+text)", "values": ["41.37"]}]},
+        {"id": "table_4", "page": 8, "caption_prefix": "Table 4", "row_checks": []}
+      ],
+      "evidence_questions": [
+        {"id": "train_images", "question": "How many training images are listed in Table 1?", "page": 4, "source_type": "table", "table_id": "table_1", "row_contains": "Train", "answer_fragments": ["449"]},
+        {"id": "multimodal_average", "question": "What is the average score of LLaMA-4 + RAG (image+text) in Table 3?", "page": 7, "source_type": "table", "table_id": "table_3", "row_contains": "LLaMA-4 + RAG (image+text)", "answer_fragments": ["41.37"]}
+      ]
+    },
+    {
+      "id": "medical_vqa_rag", "pdf_sha256": "a1303961a8ac38e38e0bc6fc7f1b44a0a8c01b1cfb523998d6dd4fb11abb24cc", "page_count": 13,
+      "tables": [
+        {"id": "table_1", "page": 4, "caption_prefix": "Table 1", "row_checks": []},
+        {"id": "table_2", "page": 5, "caption_prefix": "Table 2", "row_checks": []},
+        {"id": "table_3", "page": 5, "caption_prefix": "Table 3", "row_checks": []},
+        {"id": "table_4", "page": 6, "caption_prefix": "Table 4", "row_checks": [{"row_contains": "MM-RAG-MedVQA", "values": ["53.48"]}]},
+        {"id": "table_5", "page": 6, "caption_prefix": "Table 5", "row_checks": [{"row_contains": "Both encoders unfrozen", "values": ["67.98"]}]},
+        {"id": "table_6", "page": 10, "caption_prefix": "Table 6", "row_checks": []}
+      ],
+      "non_tables": [{"id": "algorithm_1", "page": 10, "anchor": "Algorithm 1", "reason": "pseudocode, not a data grid"}],
+      "evidence_questions": [
+        {"id": "mimic_accuracy", "question": "What MIMIC-CXR-VQA accuracy does the full MM-RAG-MedVQA method reach in Table 4?", "page": 6, "source_type": "table", "table_id": "table_4", "row_contains": "MM-RAG-MedVQA", "answer_fragments": ["53.48"]},
+        {"id": "unfrozen_medical_diff", "question": "What Medical-Diff-VQA accuracy is listed for both encoders unfrozen in Table 5?", "page": 6, "source_type": "table", "table_id": "table_5", "row_contains": "Both encoders unfrozen", "answer_fragments": ["67.98"]}
+      ]
+    },
+    {
+      "id": "ramm", "pdf_sha256": "d1bb10782187dc69c6c0b70347338ac55ed0de5ece0ca3d44f49b95b692f1b17", "page_count": 11,
+      "tables": [
+        {"id": "table_1", "page": 6, "caption_prefix": "Table 1", "row_checks": []},
+        {"id": "table_2", "page": 6, "caption_prefix": "Table 2", "row_checks": [{"row_contains": "RAMM", "values": ["82.13"]}]},
+        {"id": "table_3", "page": 6, "caption_prefix": "Table 3", "row_checks": [{"row_contains": "RAMM", "values": ["39.20"]}]},
+        {"id": "table_4", "page": 8, "caption_prefix": "Table 4", "row_checks": []},
+        {"id": "table_5", "page": 8, "caption_prefix": "Table 5", "row_checks": []},
+        {"id": "table_6", "page": 8, "caption_prefix": "Table 6", "row_checks": []},
+        {"id": "table_7", "page": 8, "caption_prefix": "Table 7", "row_checks": []}
+      ],
+      "evidence_questions": [
+        {"id": "ramm_2021", "question": "What VQA-Med 2021 score does RAMM obtain in Table 3?", "page": 6, "source_type": "table", "table_id": "table_3", "row_contains": "RAMM", "answer_fragments": ["39.20"]},
+        {"id": "ramm_2019", "question": "What VQA-Med 2019 score does RAMM obtain in Table 2?", "page": 6, "source_type": "table", "table_id": "table_2", "row_contains": "RAMM", "answer_fragments": ["82.13"]}
+      ]
+    },
+    {
+      "id": "mmgl", "pdf_sha256": "81e5cf012a5d00f8fdddae838ef362297a4e703967bfff3263c438a4720ce4bb", "page_count": 5,
+      "tables": [
+        {"id": "table_1", "page": 4, "caption_prefix": "Table 1", "row_checks": [
+          {"row_contains": "MMGL (2:3:5)", "values": ["0.743"]},
+          {"row_contains": "Random", "values": ["0.723"]}
+        ]}
+      ],
+      "evidence_questions": [
+        {"id": "mmgl_dice", "question": "What is MMGL (2:3:5)'s Dice score with 10% labeled data in Table 1?", "page": 4, "source_type": "table", "table_id": "table_1", "row_contains": "MMGL (2:3:5)", "answer_fragments": ["0.743"]},
+        {"id": "random_dice", "question": "What is Random's Dice score with 20% labeled data in Table 1?", "page": 4, "source_type": "table", "table_id": "table_1", "row_contains": "Random", "answer_fragments": ["0.723"]}
+      ]
+    },
+    {
+      "id": "rag_benchmark", "pdf_sha256": "cbabe586b43efcf21ad1801117fa959032dee5cdb9ca4f0e80ba038a762a0c97", "page_count": 9,
+      "tables": [
+        {"id": "table_1", "page": 5, "caption_prefix": "Table 1", "row_checks": []},
+        {"id": "table_2", "page": 5, "caption_prefix": "Table 2", "row_checks": []},
+        {"id": "table_3", "page": 6, "caption_prefix": "Table 3", "row_checks": [{"row_contains": "ChatGPT", "values": ["45.00", "43.33"]}]},
+        {"id": "table_4", "page": 6, "caption_prefix": "Table 4", "row_checks": []},
+        {"id": "table_5", "page": 7, "caption_prefix": "Table 5", "row_checks": []},
+        {"id": "table_6", "page": 7, "caption_prefix": "Table 6", "row_checks": []},
+        {"id": "table_7", "page": 7, "caption_prefix": "Table 7", "row_checks": []}
+      ],
+      "evidence_questions": [
+        {"id": "chatgpt_english_rej", "question": "What is ChatGPT's English Rej* percentage in Table 3?", "page": 6, "source_type": "table", "table_id": "table_3", "row_contains": "ChatGPT", "answer_fragments": ["45.00"]},
+        {"id": "chatgpt_chinese_rej", "question": "What is ChatGPT's Chinese Rej* percentage in Table 3?", "page": 6, "source_type": "table", "table_id": "table_3", "row_contains": "ChatGPT", "answer_fragments": ["43.33"]}
+      ]
+    },
+    {
+      "id": "multi_label", "pdf_sha256": "ffb7cf763d58a014b3113bcd4a45c32baa610850056eb16ffc451bd0328ce927", "page_count": 9,
+      "tables": [
+        {"id": "table_1", "page": 6, "caption_prefix": "Table 1", "row_checks": [{"row_contains": "Samples(n)", "values": ["4400"]}]},
+        {"id": "table_2", "page": 6, "caption_prefix": "Table 2", "row_checks": [{"row_contains": "SCENE", "values": ["0.2888"]}]},
+        {"id": "table_3", "page": 7, "caption_prefix": "Table 3", "row_checks": []},
+        {"id": "table_4", "page": 7, "caption_prefix": "Table 4", "row_checks": []}
+      ],
+      "evidence_questions": [
+        {"id": "scene_samples", "question": "How many SCENE samples are listed in Table 1?", "page": 6, "source_type": "table", "table_id": "table_1", "row_contains": "Samples(n)", "answer_fragments": ["4400"]},
+        {"id": "scene_ap", "question": "What is the proposed method's mean AP on SCENE in Table 2?", "page": 6, "source_type": "table", "table_id": "table_2", "row_contains": "SCENE", "answer_fragments": ["0.2888"]}
+      ]
+    },
+    {
+      "id": "global_view", "pdf_sha256": "7cd2b6ced21b83d0ec1117297b8a153344a17b04ee8552d8d9268c3395cdd56f", "page_count": 9,
+      "tables": [
+        {"id": "table_1", "page": 6, "caption_prefix": "Table 1", "row_checks": [{"row_contains": "Instances(n)", "values": ["2417"]}]},
+        {"id": "table_2", "page": 6, "caption_prefix": "Table 2", "row_checks": [{"row_contains": "SCENE", "values": ["0.8010"]}]},
+        {"id": "table_3", "page": 7, "caption_prefix": "Table 3", "row_checks": []},
+        {"id": "table_4", "page": 7, "caption_prefix": "Table 4", "row_checks": []}
+      ],
+      "evidence_questions": [
+        {"id": "yeast_instances", "question": "How many yeast instances are listed in Table 1?", "page": 6, "source_type": "table", "table_id": "table_1", "row_contains": "Instances(n)", "answer_fragments": ["2417"]},
+        {"id": "scene_ugrfs_ap", "question": "What is UGRFS's mean AP on SCENE in Table 2?", "page": 6, "source_type": "table", "table_id": "table_2", "row_contains": "SCENE", "answer_fragments": ["0.8010"]}
+      ]
+    },
+    {
+      "id": "dexterous_review", "pdf_sha256": "e28afaf268f2f372fd8389526ece09a40bf306586ee508a5b7a68976c8ac8d65", "page_count": 17,
+      "tables": [
+        {"id": "table_1", "page": 3, "caption_prefix": "Table 1", "row_checks": []},
+        {"id": "table_2", "page": 7, "caption_prefix": "Table 2", "row_checks": [
+          {"row_contains": "Value-based RL", "values": ["High sample utilization"]},
+          {"row_contains": "Model-free RL", "values": ["Demanding much data"]}
+        ]},
+        {"id": "table_3", "page": 8, "caption_prefix": "Table 3", "row_checks": []},
+        {"id": "table_4", "page": 8, "caption_prefix": "Table 4", "row_checks": []},
+        {"id": "table_5", "page": 10, "caption_prefix": "Table 5", "row_checks": []},
+        {"id": "table_6", "page": 12, "caption_prefix": "Table 6", "row_checks": []},
+        {"id": "table_7", "page": 13, "caption_prefix": "Table 7", "row_checks": []}
+      ],
+      "evidence_questions": [
+        {"id": "value_based_advantage", "question": "What sampling-related advantage does Table 2 list for value-based RL?", "page": 7, "source_type": "table", "table_id": "table_2", "row_contains": "Value-based RL", "answer_fragments": ["High sample utilization"]},
+        {"id": "model_free_disadvantage", "question": "What data-related disadvantage does Table 2 list for model-free RL?", "page": 7, "source_type": "table", "table_id": "table_2", "row_contains": "Model-free RL", "answer_fragments": ["Demanding much data"]}
+      ]
+    },
+    {
+      "id": "hallucination_rag", "pdf_sha256": "8048b7f4223cda0a4deb7e62e7289a766c958e154272354dbb3d3a7316d36e22", "page_count": 16,
+      "tables": [
+        {"id": "table_1", "page": 6, "caption_prefix": "Table 1", "row_checks": []},
+        {"id": "table_2", "page": 9, "caption_prefix": "Table 2", "row_checks": []},
+        {"id": "table_3", "page": 10, "caption_prefix": "Table 3", "row_checks": [
+          {"row_contains": "Precision", "values": ["0.85"]},
+          {"row_contains": "F1-score", "values": ["0.84"]}
+        ]},
+        {"id": "table_4", "page": 11, "caption_prefix": "Table 4", "row_checks": []}
+      ],
+      "non_tables": [{"id": "algorithm_1", "page": 7, "anchor": "Algorithm 1", "reason": "pseudocode, not a data grid"}],
+      "evidence_questions": [
+        {"id": "rag_precision", "question": "What precision is listed for the With RAG condition in Table 3?", "page": 10, "source_type": "table", "table_id": "table_3", "row_contains": "Precision", "answer_fragments": ["0.85"]},
+        {"id": "rag_f1", "question": "What F1-score is listed for the With RAG condition in Table 3?", "page": 10, "source_type": "table", "table_id": "table_3", "row_contains": "F1-score", "answer_fragments": ["0.84"]}
+      ]
+    }
+  ]
+}

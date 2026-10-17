@@ -1,0 +1,83 @@
+{
+  "schema_version": "m3-pdf-layout-gold-v1",
+  "document_id": "arxiv:1706.03762",
+  "title": "Attention Is All You Need",
+  "source_url": "https://arxiv.org/pdf/1706.03762",
+  "pdf_sha256": "bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697",
+  "page_count": 15,
+  "page_numbering": "physical_pdf_page_1_based",
+  "reviewed_pages": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+  "annotation_method": "visual review of rendered PDF pages; labels recorded without using parser output as ground truth",
+  "review_status": "pilot_needs_independent_second_review",
+  "table_definition": "A data grid with rows and columns; author blocks and figures are excluded.",
+  "tables": [
+    {
+      "id": "table_1",
+      "page": 6,
+      "caption_prefix": "Table 1:",
+      "row_checks": [{"row_contains": "Self-Attention", "values": ["O(1)"]}]
+    },
+    {
+      "id": "table_2",
+      "page": 8,
+      "caption_prefix": "Table 2:",
+      "row_checks": [{"row_contains": "Transformer (big)", "values": ["28.4", "41.8"]}]
+    },
+    {
+      "id": "table_3",
+      "page": 9,
+      "caption_prefix": "Table 3:",
+      "row_checks": [{"row_contains": "base", "values": ["512", "2048", "25.8"]}]
+    },
+    {
+      "id": "table_4",
+      "page": 10,
+      "caption_prefix": "Table 4:",
+      "row_checks": [{"row_contains": "Transformer (4 layers)", "values": ["semi-supervised", "92.7"]}]
+    }
+  ],
+  "non_tables": [
+    {"id": "author_block", "page": 1, "anchor": "Ashish Vaswani", "reason": "author and affiliation layout, no data grid"}
+  ],
+  "headings": [
+    {"page": 3, "text": "3.1 Encoder and Decoder Stacks"},
+    {"page": 6, "text": "3.5 Positional Encoding"},
+    {"page": 10, "text": "7 Conclusion"}
+  ],
+  "evidence_questions": [
+    {
+      "id": "encoder_decoder_layers",
+      "question": "How many layers are in the original Transformer encoder and decoder?",
+      "page": 3,
+      "answer_fragments": ["N = 6"],
+      "source_type": "paragraph"
+    },
+    {
+      "id": "big_transformer_bleu",
+      "question": "What are the EN-DE and EN-FR BLEU scores of Transformer (big) in Table 2?",
+      "page": 8,
+      "answer_fragments": ["28.4", "41.8"],
+      "source_type": "table",
+      "table_id": "table_2",
+      "row_contains": "Transformer (big)"
+    },
+    {
+      "id": "base_model_bleu",
+      "question": "What is the base model BLEU (dev) in Table 3?",
+      "page": 9,
+      "answer_fragments": ["25.8"],
+      "source_type": "table",
+      "table_id": "table_3",
+      "row_contains": "base"
+    },
+    {
+      "id": "semi_supervised_parser_f1",
+      "question": "What is the WSJ 23 F1 of the semi-supervised Transformer (4 layers) in Table 4?",
+      "page": 10,
+      "answer_fragments": ["92.7"],
+      "source_type": "table",
+      "table_id": "table_4",
+      "row_contains": "Transformer (4 layers)"
+    }
+  ]
+}

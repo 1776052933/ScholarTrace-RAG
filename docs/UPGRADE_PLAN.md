@@ -174,6 +174,6 @@ M1 已完成逐页 PDF 入库与结构化引用、BGE-M3 失败显式报错、�
 已实现 FastAPI 契约与任务/问答接口、MySQL/Alembic 数据模型与初始迁移、旧 SQLite 论文库备份导入、Docker Compose 基础服务和 Streamlit HTTP 客户端。API/UI 的真实界面与 API 重启验收先在独立 SQLite 数据库完成，随后在 Windows 原生 MySQL 8.4.11 上完成实际 Alembic 迁移、M1 旧库导入、有效论文重建索引、真实浏览器检索/下载/问答以及服务重启恢复。下载/入库部分失败的任务状态与界面告警已补齐。Docker Compose 运行路径按当前本机开发安排后移，仍需有 Docker/WSL 的环境复核，详见 [M2 运行与验收](M2_RUN_AND_ACCEPTANCE.md)。
 
 
-## M3 当前进度（2026-10-16）
+## M3 当前进度（2026-10-17）
 
-已加入 Milvus 2.6 dense/BM25/RRF 索引适配、可选 BGE cross-encoder 片段重排、Docling 复杂 PDF 解析路径、论文索引版本字段和 QASPER 固定集消融入口。本机 MySQL 迁移及旧索引拦截已真实验证；固定十题 Chroma dense 对照结果复现为证据召回代理 0.667。Milvus 服务端真实联调、完整消融及 Docling 真实复杂 PDF 验收尚待对应运行环境，不能宣称 M3 已完成。详见 [M3 运行与验收](M3_RUN_AND_ACCEPTANCE.md)。
+已加入 Milvus 2.6 dense/BM25/RRF 索引适配、可选 BGE cross-encoder 片段重排、Docling 复杂 PDF 解析路径和论文索引版本字段。本机 MySQL 迁移、旧索引拦截、Milvus 服务端联调、六服务 Compose 启动与重启持久性已验证。QASPER dev 固定 30 题的六路检索消融全部完成；默认 BGE 重排在开发样本上改善证据召回代理，但 CPU 延迟显著增加，因此默认关闭。十篇 PDF 的首轮标注、解析及 22 题问答对照也已完成；金标准尚待独立复核，扫描件未覆盖。详见 [M3 运行与验收](M3_RUN_AND_ACCEPTANCE.md)及[Docling 质量对照](M3_DOCLING_QUALITY_LABELING.md)。

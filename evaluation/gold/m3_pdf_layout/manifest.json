@@ -1,0 +1,16 @@
+{
+  "schema_version": "m3-pdf-layout-manifest-v1",
+  "selection": "Ten unique readable local PDFs with mixed conference, journal, and preprint layouts; chosen before reviewing Docling output. All are text-bearing, so scanned-PDF generalization is outside this set.",
+  "documents": [
+    {"id": "attention", "split": "dev", "pdf": "data/compose_acceptance/assets/papers/attention_is_all_you_need.pdf"},
+    {"id": "mediqa_wv", "split": "dev", "pdf": "data/m2/mysql_runtime/papers/https___aclanthology_org_2025_clinicalnlp-1_10_pdf/21_3b38176e775c.pdf"},
+    {"id": "medical_vqa_rag", "split": "dev", "pdf": "data/m2/mysql_runtime/papers/https___assets-eu_researchsquare_com_files_rs-7752202_v1_covered_2adb2175-a0b2-46cb-a165-0ac3f42cc1f8_pdf_c_1761676631/19_a1303961a8ac.pdf"},
+    {"id": "ramm", "split": "dev", "pdf": "data/m2/mysql_runtime/papers/https___dl_acm_org_doi_pdf_10_1145_3581783_3611830/20_d1bb10782187.pdf"},
+    {"id": "mmgl", "split": "dev", "pdf": "data/m2/mysql_runtime/papers/https___ieeexplore_ieee_org_abstract_document_8960273_/9_81e5cf012a5d.pdf"},
+    {"id": "rag_benchmark", "split": "test", "pdf": "data/m2/mysql_runtime/papers/https___ojs_aaai_org_index_php_AAAI_article_view_29728_31250/26_cbabe586b43e.pdf"},
+    {"id": "multi_label", "split": "test", "pdf": "data/m2/mysql_runtime/papers/https___arxiv_org_pdf_2511_08008v2/11_ffb7cf763d58.pdf"},
+    {"id": "global_view", "split": "test", "pdf": "data/m2/mysql_runtime/papers/https___drive_google_com_file_d_1XDU7J8iWzIeMBtmDD_dnywpi_TVevVKu_view/15_7cd2b6ced21b.pdf"},
+    {"id": "dexterous_review", "split": "test", "pdf": "data/m2/mysql_runtime/papers/https___www_frontiersin_org_articles_10_3389_fnbot_2022_861825_pdf/36_e28afaf268f2.pdf"},
+    {"id": "hallucination_rag", "split": "test", "pdf": "data/m2/mysql_runtime/papers/https___osf_io_download_pv7r5_/25_8048b7f4223c.pdf"}
+  ]
+}
