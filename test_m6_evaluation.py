@@ -8,6 +8,7 @@ import pytest
 
 from evaluation.m6_metrics import load_multi_cases, score_evidence, summarize_variants
 from evaluation.m6_review import FIELDS, summarize_sheet
+from evaluation.run_m6_candidate_retrieval import _candidate
 
 
 def test_frozen_cross_paper_cases_are_split_and_traceable() -> None:
@@ -18,6 +19,20 @@ def test_frozen_cross_paper_cases_are_split_and_traceable() -> None:
     for case in cases:
         assert len({ref["document_id"] for ref in case["references"]}) >= 2
         assert all(ref["page"] > 0 and ref["answer_fragments"] for ref in case["references"])
+
+
+def test_new_dev_and_holdout_references_do_not_reuse_original_test_facts() -> None:
+    original, _ = load_multi_cases()
+    dev, _ = load_multi_cases(cases_name="m6_dev_pairs.json", require_both_splits=False)
+    holdout, _ = load_multi_cases(cases_name="m6_holdout_pairs.json", require_both_splits=False)
+    assert len(dev) == len(holdout) == 4
+    assert {case["split"] for case in dev} == {"dev"}
+    assert {case["split"] for case in holdout} == {"test"}
+    used = {(ref["document_id"], ref["source_question_id"])
+            for case in original if case["split"] == "test" for ref in case["references"]}
+    fresh = {(ref["document_id"], ref["source_question_id"])
+             for case in holdout for ref in case["references"]}
+    assert used.isdisjoint(fresh)
 
 
 def test_cross_paper_evidence_requires_both_correct_pages_and_values() -> None:

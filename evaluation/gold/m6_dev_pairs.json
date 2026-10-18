@@ -1,0 +1,43 @@
+{
+  "schema_version": "m6-multi-paper-v1",
+  "review_status": "derived_from_m3_first_pass_labels_needs_independent_review",
+  "note": "Additional development pairs frozen before comparing retrieval candidates; not used as final test questions.",
+  "cases": [
+    {
+      "id": "dev_train_and_unfrozen",
+      "split": "dev",
+      "question": "For MEDIQA-WV, how many training images are listed in Table 1? Separately, what Medical-Diff-VQA accuracy does MM-RAG-MedVQA list for both encoders unfrozen in Table 5? Attribute each value to its paper.",
+      "references": [
+        {"document_id": "mediqa_wv", "source_question_id": "train_images"},
+        {"document_id": "medical_vqa_rag", "source_question_id": "unfrozen_medical_diff"}
+      ]
+    },
+    {
+      "id": "dev_ramm_and_mmgl_alternates",
+      "split": "dev",
+      "question": "What VQA-Med 2019 score does RAMM report in Table 2? In the separate MMGL paper, what Dice score does Random obtain with 20% labeled data in Table 1? Report the two findings separately.",
+      "references": [
+        {"document_id": "ramm", "source_question_id": "ramm_2019"},
+        {"document_id": "mmgl", "source_question_id": "random_dice"}
+      ]
+    },
+    {
+      "id": "dev_transformer_and_mediqa",
+      "split": "dev",
+      "question": "How many layers are in the original Transformer encoder and decoder according to Attention Is All You Need? In the MEDIQA-WV paper, how many training images are listed in Table 1? Give each paper's result.",
+      "references": [
+        {"document_id": "attention", "source_question_id": "encoder_decoder_layers"},
+        {"document_id": "mediqa_wv", "source_question_id": "train_images"}
+      ]
+    },
+    {
+      "id": "dev_transformer_and_ramm",
+      "split": "dev",
+      "question": "What base-model BLEU (dev) appears in Table 3 of Attention Is All You Need? Separately, what VQA-Med 2019 score does RAMM report in Table 2? Attribute each value to its paper.",
+      "references": [
+        {"document_id": "attention", "source_question_id": "base_model_bleu"},
+        {"document_id": "ramm", "source_question_id": "ramm_2019"}
+      ]
+    }
+  ]
+}

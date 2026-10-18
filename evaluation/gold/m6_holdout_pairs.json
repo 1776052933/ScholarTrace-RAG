@@ -1,0 +1,43 @@
+{
+  "schema_version": "m6-multi-paper-v1",
+  "review_status": "derived_from_m3_first_pass_labels_needs_independent_review",
+  "note": "Frozen before dev candidate comparisons. Same five test PDFs as M6, but these question pairs were not used for tuning. This is an internal holdout, not an independent external benchmark.",
+  "cases": [
+    {
+      "id": "holdout_chinese_rejection_and_f1",
+      "split": "test",
+      "question": "What Chinese Rej* percentage does the RAG benchmark paper list for ChatGPT in Table 3? Separately, what F1-score does the hallucination-and-RAG paper list for its With RAG condition in Table 3? Keep the two metrics distinct.",
+      "references": [
+        {"document_id": "rag_benchmark", "source_question_id": "chatgpt_chinese_rej"},
+        {"document_id": "hallucination_rag", "source_question_id": "rag_f1"}
+      ]
+    },
+    {
+      "id": "holdout_scene_and_yeast_counts",
+      "split": "test",
+      "question": "How many SCENE samples appear in Table 1 of the multi-label paper, and how many yeast instances appear in Table 1 of the global-view paper? Report each count with its source.",
+      "references": [
+        {"document_id": "multi_label", "source_question_id": "scene_samples"},
+        {"document_id": "global_view", "source_question_id": "yeast_instances"}
+      ]
+    },
+    {
+      "id": "holdout_rl_and_rag_f1",
+      "split": "test",
+      "question": "What data-related disadvantage does the dexterous-manipulation review list for model-free RL in Table 2? In the hallucination-and-RAG paper, what F1-score is listed for With RAG in Table 3? Attribute each finding.",
+      "references": [
+        {"document_id": "dexterous_review", "source_question_id": "model_free_disadvantage"},
+        {"document_id": "hallucination_rag", "source_question_id": "rag_f1"}
+      ]
+    },
+    {
+      "id": "holdout_rl_and_yeast",
+      "split": "test",
+      "question": "What sampling-related advantage does the dexterous-manipulation review list for value-based RL in Table 2? Separately, how many yeast instances does the global-view paper list in Table 1? State both sources.",
+      "references": [
+        {"document_id": "dexterous_review", "source_question_id": "value_based_advantage"},
+        {"document_id": "global_view", "source_question_id": "yeast_instances"}
+      ]
+    }
+  ]
+}

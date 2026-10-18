@@ -27,13 +27,14 @@ def _normalized(value: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
 
 
-def load_multi_cases(root: Path = GOLD_ROOT) -> tuple[list[dict[str, Any]], dict[str, str]]:
+def load_multi_cases(root: Path = GOLD_ROOT, *, cases_name: str = "m6_multi_paper.json",
+                     require_both_splits: bool = True) -> tuple[list[dict[str, Any]], dict[str, str]]:
     layout = root / "m3_pdf_layout"
     paths = {
         "pdf_manifest": layout / "manifest.json",
         "batch_labels": layout / "batch_labels.json",
         "attention_label": layout / "attention_is_all_you_need.json",
-        "multi_cases": root / "m6_multi_paper.json",
+        "multi_cases": root / cases_name,
     }
     files = {name: json.loads(path.read_text(encoding="utf-8")) for name, path in paths.items()}
     documents = {row["id"]: row for row in files["pdf_manifest"]["documents"]}
@@ -71,7 +72,7 @@ def load_multi_cases(root: Path = GOLD_ROOT) -> tuple[list[dict[str, Any]], dict
             })
         cases.append({"id": case_id, "split": row["split"],
                       "question": row["question"], "references": references})
-    if not cases or not {"dev", "test"}.issubset({row["split"] for row in cases}):
+    if not cases or (require_both_splits and not {"dev", "test"}.issubset({row["split"] for row in cases})):
         raise ValueError("M6 cases must contain both dev and test questions")
     return cases, {name: digest(path) for name, path in paths.items()}
 
