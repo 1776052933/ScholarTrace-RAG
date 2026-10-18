@@ -25,6 +25,16 @@ RISK_LABELS = {
     "possible_abstention": "可能拒答",
     "no_citations": "无引用",
 }
+ERROR_LABELS = {
+    "": "无 / 待判断",
+    "retrieval_miss": "检索漏掉答案证据",
+    "parser_miss": "PDF 解析丢失答案内容",
+    "unsupported_claim": "回答有缺乏证据的断言",
+    "wrong_value": "回答数值或事实错误",
+    "wrong_citation": "引用页或引用内容错误",
+    "appropriate_abstention": "合理拒答（原论文也无法回答）",
+    "other": "其他",
+}
 
 
 @st.cache_data(show_spinner=False)
@@ -42,6 +52,16 @@ def _rows() -> list[dict[str, str]]:
         if reader.fieldnames != FIELDS:
             raise ValueError("Review sheet columns have changed")
         return list(reader)
+
+
+@st.cache_data(show_spinner=False)
+def _answer_records() -> dict[tuple[str, str, str, str], dict]:
+    records = {}
+    for path in sorted(ANSWERS_DIR.glob("[0-9][0-9][0-9]_*.json")):
+        item = json.loads(path.read_text(encoding="utf-8"))
+        key = (item["split"], item["document_id"], item["question_id"], item["variant"])
+        records[key] = item
+    return records
 
 
 def _save(rows: list[dict[str, str]]) -> None:
@@ -62,7 +82,7 @@ def main() -> None:
         st.error("未找到复核表。先运行 python -m evaluation.m6_review 生成本地 CSV。")
         st.stop()
     rows = _rows()
-    summary = summarize_sheet(SHEET)
+    summarize_sheet(SHEET)
     reviewed = sum(bool(row["answer_correct"] and row["citations_supported"]) for row in rows)
     st.progress(reviewed / len(rows), text=f"回答和引用均已复核 {reviewed}/{len(rows)}")
     priorities = prioritize(ANSWERS_DIR)
@@ -83,7 +103,10 @@ def main() -> None:
         format_func=lambda i: f"{i + 1:02d} · {rows[i]['split']} · {rows[i]['document_id']} · {rows[i]['variant']} · {rows[i]['question'][:65]}",
     )
     row = rows[selected]
-    flags = risks.get((row["split"], row["document_id"], row["question_id"], row["variant"]), [])
+    key = (row["split"], row["document_id"], row["question_id"], row["variant"])
+    flags = risks.get(key, [])
+    source = _answer_records()[key]
+    citations = source.get("citations") or []
     if flags:
         st.warning("自动排查提示：" + "、".join(RISK_LABELS.get(flag, flag) for flag in flags)
                    + "。这些是核对线索，不是错误判定。")
@@ -97,9 +120,19 @@ def main() -> None:
         st.text_area("回答原文", row["answer"], height=180, disabled=True)
         st.caption(f"待核对的标注候选：{row['answer_fragments']}；页码：{row['gold_page']}。请以原始 PDF 为准。")
         st.subheader("引用")
-        pages = [int(value) for value in row["cited_pages"].split(" | ") if value.strip().isdigit()]
+        pages = [int(cite["page"]) for cite in citations]
         st.write("引用页：" + (", ".join(map(str, pages)) if pages else "无"))
-        st.text_area("引用摘录", row["cited_excerpts"], height=260, disabled=True)
+        if not citations:
+            st.info("该回答没有引用片段。")
+        for index, cite in enumerate(citations, start=1):
+            st.text_area(f"引用 {index} · PDF 第 {cite['page']} 页",
+                         str(cite.get("excerpt") or ""), height=160, disabled=True,
+                         key=f"citation_{selected}_{index}")
+        with st.expander("判定口径"):
+            st.markdown("回答应完整、准确地回答问题，以原始 PDF 为准；标注候选仅作定位线索。"
+                        "引用需要在所标页提供足以支持回答的原文，仅页码相同不算支持。"
+                        "如果论文中能找到答案而系统拒答，回答应判为错误，并记录漏检或解析问题。"
+                        "只有原论文也无法回答时，才选择合理拒答。")
         with st.form(key=f"review_{selected}"):
             choices = ["unreviewed", "yes", "no"]
             answer = st.radio("回答事实是否正确？", choices,
@@ -113,7 +146,7 @@ def main() -> None:
             errors = sorted(ERROR_TYPES)
             error_type = st.selectbox("错误类型", errors,
                                       index=errors.index(row["error_type"]),
-                                      format_func=lambda value: value or "无 / 待判断")
+                                      format_func=lambda value: ERROR_LABELS[value])
             reviewer = st.text_input("复核人", value=row["reviewer"] or st.session_state.get("reviewer", ""))
             notes = st.text_area("备注", value=row["notes"])
             submitted = st.form_submit_button("保存本题", type="primary")
@@ -132,10 +165,18 @@ def main() -> None:
         if not pdf.is_file():
             st.warning(f"本机缺少 PDF：{pdf}")
         else:
+            with pymupdf.open(pdf) as document:
+                page_count = len(document)
             display_pages = list(dict.fromkeys([int(row["gold_page"]), *pages]))
             for page in display_pages:
                 with st.expander(f"PDF 第 {page} 页", expanded=page == int(row["gold_page"])):
                     st.image(_page_png(str(pdf), page, pdf.stat().st_mtime), width="stretch")
+            browse_page = st.number_input("需要时查看 PDF 其他页", min_value=1,
+                                          max_value=page_count, value=int(row["gold_page"]),
+                                          step=1, key=f"browse_page_{selected}")
+            if browse_page not in display_pages:
+                st.image(_page_png(str(pdf), browse_page, pdf.stat().st_mtime),
+                         caption=f"PDF 第 {browse_page} 页", width="stretch")
 
 
 if __name__ == "__main__":

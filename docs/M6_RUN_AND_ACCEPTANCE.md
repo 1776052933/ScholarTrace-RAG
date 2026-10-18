@@ -64,7 +64,7 @@ docker run --rm -v "${PWD}:/app" -w /app -e HF_HUB_OFFLINE=1 auto_paper-model-ap
 docker run --rm -p 127.0.0.1:18506:8501 -v "${PWD}:/app" -w /app auto_paper-model-api:latest python -m streamlit run evaluation/m6_review_ui.py --server.address=0.0.0.0 --server.port=8501
 ```
 
-浏览器打开 `http://127.0.0.1:18506`。该页面不调用模型或外部接口；文件和审查结果都留在本机。审查人应独立核对 PDF，不能把自动字串指标当作答案正确性。
+浏览器打开 `http://127.0.0.1:18506`。该页面逐条显示引用及其 PDF 页，并允许查看其他页；每题分别判断回答事实和引用支持，填写复核人、错误类型与必要的备注，点击“保存本题”。默认只显示未完成题，保存后自动切到下一题；取消该筛选可以修改已保存的判断。该页面不调用模型或外部接口；文件和审查结果都留在本机。审查人应以原始 PDF 为准，标注候选和自动风险提示只用于定位，不能直接当作正确性结论。
 
 `python -m evaluation.render_m6_gold_pages --split test` 可将金标准页渲染为本地 PNG，辅助核对表格值和页码。复核范围为全部 44 条，界面优先展示自动标出的 4 条风险记录；其余 40 条也必须分别检查回答与引用。全部结果位于被 `.gitignore` 排除的 `evaluation/runs/`。全部评测完成后，`python -m evaluation.report_m6` 从固定运行记录重建 `docs/M6_REPORT.md`。新留出题的结果与默认策略决定见 [检索优化后续记录](M6_RETRIEVAL_FOLLOWUP.md)。
 
