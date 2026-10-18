@@ -1,0 +1,43 @@
+{
+  "schema_version": "m6-multi-paper-v1",
+  "review_status": "derived_from_m3_first_pass_labels_needs_independent_review",
+  "note": "Each question requests two separately reported facts. Scores from different tasks must not be interpreted as directly comparable.",
+  "cases": [
+    {
+      "id": "dev_medical_vqa_scores",
+      "split": "dev",
+      "question": "According to the two papers, what average score does LLaMA-4 + RAG (image+text) have in MEDIQA-WV Table 3, and what MIMIC-CXR-VQA accuracy does MM-RAG-MedVQA report in Table 4? Report each result with its paper.",
+      "references": [
+        {"document_id": "mediqa_wv", "source_question_id": "multimodal_average"},
+        {"document_id": "medical_vqa_rag", "source_question_id": "mimic_accuracy"}
+      ]
+    },
+    {
+      "id": "dev_medical_methods",
+      "split": "dev",
+      "question": "What VQA-Med 2021 score does RAMM report in Table 3, and what Dice score does MMGL (2:3:5) report with 10% labeled data in Table 1? State which paper gives each value.",
+      "references": [
+        {"document_id": "ramm", "source_question_id": "ramm_2021"},
+        {"document_id": "mmgl", "source_question_id": "mmgl_dice"}
+      ]
+    },
+    {
+      "id": "test_scene_ap",
+      "split": "test",
+      "question": "In their respective SCENE experiments, what mean AP does the proposed multi-label method report in Table 2, and what mean AP does UGRFS report in Table 2? Attribute each value to its paper; do not assume the experimental settings are identical.",
+      "references": [
+        {"document_id": "multi_label", "source_question_id": "scene_ap"},
+        {"document_id": "global_view", "source_question_id": "scene_ugrfs_ap"}
+      ]
+    },
+    {
+      "id": "test_rag_metrics",
+      "split": "test",
+      "question": "What English Rej* percentage does the RAG benchmark paper list for ChatGPT in Table 3, and what precision does the hallucination-and-RAG paper list for its With RAG condition in Table 3? Keep the two metrics distinct.",
+      "references": [
+        {"document_id": "rag_benchmark", "source_question_id": "chatgpt_english_rej"},
+        {"document_id": "hallucination_rag", "source_question_id": "rag_precision"}
+      ]
+    }
+  ]
+}

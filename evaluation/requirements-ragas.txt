@@ -1,0 +1,6 @@
+# Optional offline evaluation dependency, kept out of the production image.
+ragas==0.4.3
+# Ragas 0.4.3 still imports the VertexAI shim removed in 0.4.2.
+langchain-community>=0.4,<0.4.2
+# Keep the optional evaluator compatible with production transformers 4.57.6.
+huggingface-hub>=0.34,<1.0

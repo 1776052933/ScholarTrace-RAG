@@ -2,7 +2,7 @@
 
 输入研究问题后，项目依次完成查询理解与拆解、多来源论文检索、引文扩展、论文排序、开放全文获取，以及基于论文内容的摘要、知识抽取和问答。
 
-M2 已接入 FastAPI、MySQL/Alembic 和 Streamlit HTTP 客户端；M3 已完成 Milvus 检索消融和复杂 PDF 首轮对照；M4 已接入 Redis/Celery 选文入库、失败重试和多论文证据问答；M5 接入 LangGraph 搜索与证据补检工作流、MCP 服务及可选的 Langfuse 追踪。运行及验收见 [M5 运行与验收](docs/M5_RUN_AND_ACCEPTANCE.md)、[M4 运行与验收](docs/M4_RUN_AND_ACCEPTANCE.md)、[M3 运行与验收](docs/M3_RUN_AND_ACCEPTANCE.md)和[升级计划](docs/UPGRADE_PLAN.md)。数据集位置见[数据集说明](docs/DATASETS.md)；[M0 评测说明](evaluation/M0.md)、[M0 十题基线](evaluation/M0_BASELINE.md)和[M1 对照](evaluation/M1_COMPARISON.md)可用于同输入复测。[版本归档与 M1 工程验收](docs/VERSION_ARCHIVE_AND_M1_ACCEPTANCE.md)记录了早期源码和验收边界。
+M2 已接入 FastAPI、MySQL/Alembic 和 Streamlit HTTP 客户端；M3 已完成 Milvus 检索消融和复杂 PDF 首轮对照；M4 已接入 Redis/Celery 选文入库、失败重试和多论文证据问答；M5 接入 LangGraph 搜索与证据补检工作流、MCP 服务及可选的 Langfuse 追踪。M6 加入固定留出集消融、跨论文证据对照、离线 Ragas、人工复核表和 GitHub Actions。先看 [M6 评测报告](docs/M6_REPORT.md)与[M6 运行及演示](docs/M6_RUN_AND_ACCEPTANCE.md)；此前阶段见 [M5 运行与验收](docs/M5_RUN_AND_ACCEPTANCE.md)、[M4 运行与验收](docs/M4_RUN_AND_ACCEPTANCE.md)、[M3 运行与验收](docs/M3_RUN_AND_ACCEPTANCE.md)和[升级计划](docs/UPGRADE_PLAN.md)。数据集位置见[数据集说明](docs/DATASETS.md)；[M0 评测说明](evaluation/M0.md)、[M0 十题基线](evaluation/M0_BASELINE.md)和[M1 对照](evaluation/M1_COMPARISON.md)可用于同输入复测。[版本归档与 M1 工程验收](docs/VERSION_ARCHIVE_AND_M1_ACCEPTANCE.md)记录了早期源码和验收边界。
 
 项目采用模块化工作流。LangGraph 编排 `SearchAgent` 的规划、检索、评价和多轮调整，并控制 RAG 证据补检；其他以 Agent 命名的模块承担排序等职责。当前实现没有多个自主 Agent 之间的任务委派与协作机制。
 
@@ -15,7 +15,7 @@ M2 已接入 FastAPI、MySQL/Alembic 和 Streamlit HTTP 客户端；M3 已完成
 | `ranking_agent/` | 用 BGE-M3、元数据特征和大模型评分排序论文 |
 | `paper_downloader/`、`literature_database/` | 获取开放全文，管理下载状态及论文记录 |
 | `rag_reader/` | 解析全文、切分、向量检索、摘要、知识抽取与证据问答 |
-| `evaluation/` | M0 固定语料检索、QASPER 全文问答、M3 检索消融与在线搜索评测 |
+| `evaluation/` | 固定语料检索、QASPER 消融、跨论文证据对照、离线 Ragas 与人工复核工具 |
 | `Auto_Paper_UI/` | Streamlit HTTP 界面、候选选文、入库进度、多论文问答与导出 |
 | `app/api/`、`app/services/`、`app/tasks.py` | FastAPI 契约、MySQL 持久化状态、Celery 入库、论文问答与领域工作流 |
 | `app/storage/`、`migrations/` | MySQL 业务表和 Alembic 迁移 |
@@ -38,5 +38,7 @@ docker compose up --build -d
 ```powershell
 python -m pytest -q -m "not slow"
 ```
+
+快速验收的无密钥回归命令见 [M6 运行及演示](docs/M6_RUN_AND_ACCEPTANCE.md)；GitHub Actions 在推送和 PR 时运行关键路径测试与 Compose 配置检查。
 
 数据集、PDF、缓存、运行结果和本地密钥均被 `.gitignore` 排除。

@@ -1,0 +1,57 @@
+name: Offline checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-test.txt
+            evaluation/requirements.txt
+            Auto_Paper_UI/requirements-ui.txt
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r requirements-test.txt
+          python -m pip check
+      - name: No-key regression and M6 evaluation contracts
+        env:
+          DEEPSEEK_API_KEY: ''
+          SERPAPI_API_KEY: ''
+          OPENALEX_API_KEY: ''
+        run: |
+          python -m pytest -q test_m6_evaluation.py test_m5_workflow.py test_m4_async.py test_m3_retrieval.py test_m3_api.py test_m2_api.py test_m1_rag.py test_m1_service.py
+      - name: Validate all Compose services
+        run: docker compose --env-file .env.example config --quiet
+
+  ragas-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: evaluation/requirements-ragas.txt
+      - name: Install the optional evaluation stack
+        run: |
+          python -m pip install -r evaluation/requirements-ragas.txt
+          python -m pip check
+      - name: Score an offline fixture
+        run: python -c "from ragas.metrics.collections import StringPresence; assert StringPresence().score(reference='0.85', response='Precision is 0.85').value == 1.0"
