@@ -68,6 +68,8 @@ docker run --rm -p 127.0.0.1:18506:8501 -v "${PWD}:/app" -w /app auto_paper-mode
 
 `python -m evaluation.render_m6_gold_pages --split test` 可将金标准页渲染为本地 PNG，辅助核对表格值和页码。复核范围为全部 44 条，界面优先展示自动标出的 4 条风险记录；其余 40 条也必须分别检查回答与引用。全部结果位于被 `.gitignore` 排除的 `evaluation/runs/`。全部评测完成后，`python -m evaluation.report_m6` 从固定运行记录重建 `docs/M6_REPORT.md`。新留出题的结果与默认策略决定见 [检索优化后续记录](M6_RETRIEVAL_FOLLOWUP.md)。
 
+另有[44 条回答的 AI 辅助初审](M6_AI_ASSISTED_REVIEW.md)，用于缩小人工排查范围。其逐项判断单独存放，不会写入具名人工复核表；初审比例不能称作人工正确率。
+
 ## 本轮验收范围
 
 - 已以固定 seed 跑 QASPER 留出集六路检索消融，保留逐题耗时和失败记录；报告中的数值按同一 test 集比较。
