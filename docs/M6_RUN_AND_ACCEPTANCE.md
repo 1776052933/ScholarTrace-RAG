@@ -58,6 +58,14 @@ docker run --rm -v "${PWD}:/app" -w /app -e HF_HUB_OFFLINE=1 auto_paper-model-ap
 
 缓存答案的离线 Ragas 复核使用 `evaluation/requirements-ragas.txt`，建议在独立虚拟环境或临时容器安装。Ragas 0.4.3 与较新的 `langchain-community` 导入路径冲突，因此此处固定兼容版本；运行 `python -m evaluation.run_m6_ragas` 后只得到字串存在率，**不是** faithfulness。人工审查执行 `python -m evaluation.m6_review`，在本地生成的 CSV 逐行填写 `answer_correct`、`citations_supported`（`yes/no`）、错误类型、复核人，再执行 `python -m evaluation.m6_review --summary-only`。留空项不能计为正确。
 
+也可用本地页面复核，无需直接编辑 CSV。它逐题展示缓存回答、引用和原始 PDF 页，点击保存后写回同一张表。先生成复核表，再运行：
+
+```powershell
+docker run --rm -p 127.0.0.1:18506:8501 -v "${PWD}:/app" -w /app auto_paper-model-api:latest python -m streamlit run evaluation/m6_review_ui.py --server.address=0.0.0.0 --server.port=8501
+```
+
+浏览器打开 `http://127.0.0.1:18506`。该页面不调用模型或外部接口；文件和审查结果都留在本机。审查人应独立核对 PDF，不能把自动字串指标当作答案正确性。
+
 `python -m evaluation.render_m6_gold_pages --split test` 可将金标准页渲染为本地 PNG，辅助核对表格值和页码。全部结果位于被 `.gitignore` 排除的 `evaluation/runs/`。全部评测完成后，`python -m evaluation.report_m6` 从固定运行记录重建 `docs/M6_REPORT.md`。
 
 ## 本轮验收范围
