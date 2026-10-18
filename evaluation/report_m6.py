@@ -104,19 +104,25 @@ def build_report(qasper_dir: Path, multi_path: Path, answers_dir: Path,
     wall_seconds = (datetime.fromisoformat(qsummary["finished_at_utc"]) -
                     datetime.fromisoformat(qmanifest["started_at_utc"])).total_seconds()
     lines.extend([f"人工复核表：**{reviewed}/{total}** 条答案已填写正确性判断；"
-                  + ("复核完成。" if review["complete"] else "尚未完成，不能报告人工正确率或引用支持率。"),
-                  "", "## 成本、限制与下一步", "",
+                  + ("全部回答与引用已具名复核。" if review["complete"] else "尚未完成，不能报告人工正确率或引用支持率。")])
+    if review["complete"]:
+        lines.extend(["", "| 分组 | 回答正确/总数 | 引用支持/总数 |", "| --- | ---: | ---: |"])
+        for name, row in review["groups"].items():
+            lines.append(f"| {name} | {row['answer_correct']}/{row['rows']} ({_pct(row['answer_correct'] / row['rows'])}) | {row['citation_supported']}/{row['rows']} ({_pct(row['citation_supported'] / row['rows'])}) |")
+        lines.append("\n以上比例只涵盖审查表中的固定 44 条，不代表开放问题上的正确率。")
+    lines.extend(["", "## 成本、限制与下一步", "",
                   f"- QASPER 检索本轮完成 {len(qrecords)} 题 × {len(qmanifest['variants'])} 路；运行记录包含逐题耗时和失败状态。M6 额外生成调用 0 次、在线判分调用 0 次。",
                   f"- 这次 CPU 本机 QASPER 运行约 {wall_seconds / 60:.1f} 分钟，其中论文清洗、切块和两种索引写入约 {qsummary['ingest_seconds'] / 60:.1f} 分钟；查询延迟单独见表格，不包括入库。",
                   "- 现有首轮 PDF 标注未独立复核；四道跨论文题不足以代表复杂研究任务；结构化 QASPER 不能验证 PDF 页码。",
                   "- LitSearch 全量 64,183 篇语料尚未跑官方固定集；早期 32 篇烟测没有金标准覆盖，不能报告发现质量。",
-                  "- 先由第二位审查者核对 44 条回答与 10 篇 PDF 的标注，再扩大多论文 test 集，补无答案/拒答题，并对比真实回答质量与引用支持率。",
+                  "- 完成 44 条回答与 10 篇 PDF 的独立复核后，再扩大多论文 test 集，补无答案/拒答题，并对比真实回答质量与引用支持率。",
                   "", "## 复现入口", "",
                   "- `python -m pytest -q test_m6_evaluation.py`：无密钥评测契约。",
                   "- `python -m evaluation.run_m3_ablation --split test --limit 30 --seed 42 ...`：六路检索；参数见 M6 运行说明。",
                   "- `python -m evaluation.run_m6_multi_evidence ...`：复用固定 PDF 索引的跨论文对照。",
                   "- `python -m evaluation.m6_review`：生成本地审查表；填写后加 `--summary-only` 汇总。",
-                  "- `python -m evaluation.run_m6_ragas`：安装可选 Ragas 后，对缓存答案做离线字串检查。", ""])
+                  "- `python -m evaluation.run_m6_ragas`：安装可选 Ragas 后，对缓存答案做离线字串检查。",
+                  "- [检索优化后续记录](M6_RETRIEVAL_FOLLOWUP.md)：新增留出题的负结果、失败案例和默认策略决定。", ""])
     return "\n".join(lines)
 
 

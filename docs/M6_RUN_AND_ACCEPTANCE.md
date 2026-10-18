@@ -66,7 +66,7 @@ docker run --rm -p 127.0.0.1:18506:8501 -v "${PWD}:/app" -w /app auto_paper-mode
 
 浏览器打开 `http://127.0.0.1:18506`。该页面不调用模型或外部接口；文件和审查结果都留在本机。审查人应独立核对 PDF，不能把自动字串指标当作答案正确性。
 
-`python -m evaluation.render_m6_gold_pages --split test` 可将金标准页渲染为本地 PNG，辅助核对表格值和页码。全部结果位于被 `.gitignore` 排除的 `evaluation/runs/`。全部评测完成后，`python -m evaluation.report_m6` 从固定运行记录重建 `docs/M6_REPORT.md`。
+`python -m evaluation.render_m6_gold_pages --split test` 可将金标准页渲染为本地 PNG，辅助核对表格值和页码。复核范围为全部 44 条，界面优先展示自动标出的 4 条风险记录；其余 40 条也必须分别检查回答与引用。全部结果位于被 `.gitignore` 排除的 `evaluation/runs/`。全部评测完成后，`python -m evaluation.report_m6` 从固定运行记录重建 `docs/M6_REPORT.md`。新留出题的结果与默认策略决定见 [检索优化后续记录](M6_RETRIEVAL_FOLLOWUP.md)。
 
 ## 本轮验收范围
 

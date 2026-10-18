@@ -72,7 +72,7 @@ Ragas `StringPresence` 对 M3 缓存答案进行离线片段检查：
 - 这次 CPU 本机 QASPER 运行约 20.3 分钟，其中论文清洗、切块和两种索引写入约 9.3 分钟；查询延迟单独见表格，不包括入库。
 - 现有首轮 PDF 标注未独立复核；四道跨论文题不足以代表复杂研究任务；结构化 QASPER 不能验证 PDF 页码。
 - LitSearch 全量 64,183 篇语料尚未跑官方固定集；早期 32 篇烟测没有金标准覆盖，不能报告发现质量。
-- 先由第二位审查者核对 44 条回答与 10 篇 PDF 的标注，再扩大多论文 test 集，补无答案/拒答题，并对比真实回答质量与引用支持率。
+- 完成 44 条回答与 10 篇 PDF 的独立复核后，再扩大多论文 test 集，补无答案/拒答题，并对比真实回答质量与引用支持率。
 
 ## 复现入口
 
@@ -81,3 +81,4 @@ Ragas `StringPresence` 对 M3 缓存答案进行离线片段检查：
 - `python -m evaluation.run_m6_multi_evidence ...`：复用固定 PDF 索引的跨论文对照。
 - `python -m evaluation.m6_review`：生成本地审查表；填写后加 `--summary-only` 汇总。
 - `python -m evaluation.run_m6_ragas`：安装可选 Ragas 后，对缓存答案做离线字串检查。
+- [检索优化后续记录](M6_RETRIEVAL_FOLLOWUP.md)：新增留出题的负结果、失败案例和默认策略决定。

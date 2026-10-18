@@ -88,7 +88,7 @@ def summarize_sheet(path: Path, *, expected_counts: dict[str, int] = EXPECTED_CO
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, default=Path("evaluation/runs/m3_parser_answers_10pdf_20261017"))
-    parser.add_argument("--sheet", type=Path, default=Path("evaluation/runs/m6_answer_review.csv"))
+    parser.add_argument("--sheet", type=Path, default=Path("evaluation/runs/m6_answer_review_20261018.csv"))
     parser.add_argument("--summary-only", action="store_true")
     args = parser.parse_args()
     if not args.summary_only:

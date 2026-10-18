@@ -12,10 +12,19 @@ import pymupdf
 import streamlit as st
 
 from evaluation.m6_review import ERROR_TYPES, FIELDS, summarize_sheet
+from evaluation.m6_review_priorities import prioritize
 
 
 SHEET = Path("evaluation/runs/m6_answer_review_20261018.csv")
 PDF_MANIFEST = Path("evaluation/gold/m3_pdf_layout/manifest.json")
+ANSWERS_DIR = Path("evaluation/runs/m3_parser_answers_10pdf_20261017")
+RISK_LABELS = {
+    "answer_missing_annotated_fragment": "回答未包含标注片段",
+    "gold_page_not_cited": "未引用标注页",
+    "annotated_fragment_not_contiguous_in_cited_page": "引用摘录未连续包含标注片段",
+    "possible_abstention": "可能拒答",
+    "no_citations": "无引用",
+}
 
 
 @st.cache_data(show_spinner=False)
@@ -54,11 +63,18 @@ def main() -> None:
         st.stop()
     rows = _rows()
     summary = summarize_sheet(SHEET)
-    reviewed = sum(item["answer_reviewed"] for item in summary["groups"].values())
-    st.progress(reviewed / len(rows), text=f"答案已复核 {reviewed}/{len(rows)}")
+    reviewed = sum(bool(row["answer_correct"] and row["citations_supported"]) for row in rows)
+    st.progress(reviewed / len(rows), text=f"回答和引用均已复核 {reviewed}/{len(rows)}")
+    priorities = prioritize(ANSWERS_DIR)
+    risks = {(item["split"], item["document_id"], item["question_id"], item["variant"]): item["reasons"]
+             for item in priorities}
     pending_only = st.checkbox("只显示未完成的题目", value=True)
+    risk_first = st.checkbox("优先显示需重点核对的题目", value=True)
     indexes = [i for i, row in enumerate(rows)
                if not pending_only or not row["answer_correct"] or not row["citations_supported"]]
+    if risk_first:
+        indexes.sort(key=lambda i: (not bool(risks.get((rows[i]["split"], rows[i]["document_id"],
+                                                       rows[i]["question_id"], rows[i]["variant"]))), i))
     if not indexes:
         st.success("所有行都有判断。请导出并检查汇总结果。")
         st.stop()
@@ -67,6 +83,10 @@ def main() -> None:
         format_func=lambda i: f"{i + 1:02d} · {rows[i]['split']} · {rows[i]['document_id']} · {rows[i]['variant']} · {rows[i]['question'][:65]}",
     )
     row = rows[selected]
+    flags = risks.get((row["split"], row["document_id"], row["question_id"], row["variant"]), [])
+    if flags:
+        st.warning("自动排查提示：" + "、".join(RISK_LABELS.get(flag, flag) for flag in flags)
+                   + "。这些是核对线索，不是错误判定。")
     pdfs = {item["id"]: Path(item["pdf"])
             for item in json.loads(PDF_MANIFEST.read_text(encoding="utf-8"))["documents"]}
     pdf = pdfs[row["document_id"]]
@@ -75,7 +95,7 @@ def main() -> None:
         st.subheader("题目与回答")
         st.write(row["question"])
         st.text_area("回答原文", row["answer"], height=180, disabled=True)
-        st.caption(f"金标准候选片段：{row['answer_fragments']}；页码：{row['gold_page']}")
+        st.caption(f"待核对的标注候选：{row['answer_fragments']}；页码：{row['gold_page']}。请以原始 PDF 为准。")
         st.subheader("引用")
         pages = [int(value) for value in row["cited_pages"].split(" | ") if value.strip().isdigit()]
         st.write("引用页：" + (", ".join(map(str, pages)) if pages else "无"))
