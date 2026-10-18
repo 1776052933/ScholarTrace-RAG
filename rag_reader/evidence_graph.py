@@ -29,9 +29,17 @@ class EvidenceGraph:
     The answer model must still decide whether the retrieved text is sufficient.
     """
 
-    def __init__(self, retriever: Any, *, top_k: int = 5) -> None:
+    def __init__(self, retriever: Any, *, top_k: int = 5,
+                 strategy: str | None = None, max_chunks: int | None = None) -> None:
         self.retriever = retriever
         self.top_k = top_k
+        self.strategy = strategy or os.getenv("RAG_EVIDENCE_STRATEGY", "coverage")
+        if self.strategy not in {"coverage", "balanced"}:
+            raise ValueError("RAG_EVIDENCE_STRATEGY must be coverage or balanced")
+        self.max_chunks = int(max_chunks if max_chunks is not None else
+                              os.getenv("RAG_EVIDENCE_MAX_CHUNKS", "10"))
+        if self.max_chunks < 2:
+            raise ValueError("RAG_EVIDENCE_MAX_CHUNKS must be at least 2")
         self.max_expansions = min(2, max(0, int(os.getenv("RAG_EVIDENCE_MAX_EXPANSIONS", "1"))))
         graph = StateGraph(EvidenceState)
         for name, action in (
@@ -71,6 +79,18 @@ class EvidenceGraph:
 
     def _retrieve(self, state: EvidenceState) -> dict[str, Any]:
         ids = state["paper_ids"]
+        if self.strategy == "balanced" and len(ids) > 1:
+            if self.max_chunks < 2 * len(ids):
+                raise ValueError("balanced evidence budget requires two chunks per selected paper")
+            per_paper = min(3, self.max_chunks // len(ids))
+            chunks = []
+            seen = set()
+            for paper_id in ids:
+                for chunk in self.retriever.retrieve(paper_id, state["question"], top_k=per_paper):
+                    if chunk.chunk_id not in seen:
+                        chunks.append(chunk)
+                        seen.add(chunk.chunk_id)
+            return {"chunks": [chunk.model_dump(mode="json") for chunk in chunks]}
         found = (
             self.retriever.retrieve(ids[0], state["question"], top_k=state["top_k"])
             if len(ids) == 1 else

@@ -8,7 +8,6 @@ import pytest
 
 from evaluation.m6_metrics import load_multi_cases, score_evidence, summarize_variants
 from evaluation.m6_review import FIELDS, summarize_sheet
-from evaluation.run_m6_candidate_retrieval import _candidate
 
 
 def test_frozen_cross_paper_cases_are_split_and_traceable() -> None:

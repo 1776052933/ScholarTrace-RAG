@@ -14,8 +14,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=Path("evaluation/runs/m6_pdf_review"))
     parser.add_argument("--split", choices=["dev", "test", "all"], default="test")
+    parser.add_argument("--cases", default="m6_multi_paper.json")
     args = parser.parse_args()
-    cases, _ = load_multi_cases()
+    cases, _ = load_multi_cases(cases_name=args.cases, require_both_splits=False)
     manifest = json.loads(Path("evaluation/gold/m3_pdf_layout/manifest.json").read_text(encoding="utf-8"))
     paths = {row["id"]: Path(row["pdf"]) for row in manifest["documents"]}
     args.output_dir.mkdir(parents=True, exist_ok=True)

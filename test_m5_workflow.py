@@ -172,6 +172,26 @@ def test_evidence_graph_reports_limit_when_paper_has_no_passages(monkeypatch):
     assert report["expansions"] == 1
 
 
+def test_balanced_evidence_reserves_slots_for_each_paper():
+    retriever = _Retriever()
+    chunks, report = EvidenceGraph(retriever, top_k=5,
+                                   strategy="balanced", max_chunks=10).run(["a", "b"], "compare")
+    assert len(chunks) == 6
+    assert [chunk.paper_id for chunk in chunks] == ["a"] * 3 + ["b"] * 3
+    assert report["expansions"] == 0
+    assert retriever.calls == [("a", 3), ("b", 3)]
+
+
+def test_balanced_evidence_caps_five_papers_at_ten_chunks():
+    retriever = _Retriever()
+    ids = ["a", "b", "c", "d", "e"]
+    chunks, _ = EvidenceGraph(retriever, top_k=5,
+                              strategy="balanced", max_chunks=10).run(ids, "compare")
+    assert len(chunks) == 10
+    assert {chunk.paper_id for chunk in chunks} == set(ids)
+    assert all(top_k == 2 for _, top_k in retriever.calls)
+
+
 def test_mcp_tools_reuse_api(monkeypatch):
     from app.mcp import server
 

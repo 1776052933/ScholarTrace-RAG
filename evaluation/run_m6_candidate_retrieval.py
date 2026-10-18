@@ -18,7 +18,8 @@ from rag_reader.vector_store import VectorStore
 from .m6_metrics import load_multi_cases, score_evidence, summarize_variants
 
 
-VARIANTS = ("plain_dense", "existing_graph", "per_paper_2", "per_paper_3", "per_paper_5")
+VARIANTS = ("plain_dense", "existing_graph", "balanced_graph",
+            "per_paper_2", "per_paper_3", "per_paper_5")
 INDEX_DIR = Path("evaluation/runs/m3_parser_retrieval_10pdf_20261017")
 
 
@@ -32,6 +33,9 @@ def _candidate(retriever: PaperRetriever, graph: EvidenceGraph, name: str,
         return retriever.retrieve_multiple(paper_ids, question, top_k=5), None
     if name == "existing_graph":
         return graph.run(paper_ids, question)
+    if name == "balanced_graph":
+        return EvidenceGraph(retriever, top_k=5, strategy="balanced", max_chunks=10).run(
+            paper_ids, question)
     per_paper = int(name.rsplit("_", 1)[1])
     chunks = []
     seen = set()
