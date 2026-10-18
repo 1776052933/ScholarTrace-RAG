@@ -148,6 +148,7 @@ class SearchAgentResult(SchemaModel):
     original_query: str
     rounds_completed: int
     stopped_reason: str
+    graph_thread_id: Optional[str] = None
     papers: List[PaperMetadata] = Field(default_factory=list)
     iterations: List[SearchIteration] = Field(default_factory=list)
     final_evaluation: SearchEvaluation

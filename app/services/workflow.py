@@ -136,6 +136,12 @@ class AutoPaperWorkflow:
             fallback_to_rules=True,
         )
         self.search_agent = search_agent or SearchAgent(max_round=max_search_rounds)
+        if isinstance(self.search_agent, SearchAgent):
+            from app.workflows.search import GraphSearchAgent
+            self.search_agent = GraphSearchAgent(
+                self.search_agent,
+                checkpoint_path=Path(chroma_directory).parent / "search_graph.sqlite3",
+            )
         self.ranking_agent = ranking_agent or RankingAgent()
         self.citation_tracker = citation_tracker
         if self.citation_tracker is None and enable_citation_tracking:

@@ -187,6 +187,10 @@ def test_multi_paper_qa_keeps_sources_from_both_papers():
             assert paper_ids == ["p1", "p2"] and top_k == 5
             return chunks
 
+        def retrieve(self, paper_id, _question, *, top_k):
+            assert top_k == 7
+            return [chunk for chunk in chunks if chunk.paper_id == paper_id]
+
     class Client:
         def chat(self, _messages, **_kwargs):
             return json.dumps({"answer": "Both papers provide evidence.",
@@ -195,6 +199,7 @@ def test_multi_paper_qa_keeps_sources_from_both_papers():
     answer = PaperQA(Retriever(), llm_client=Client()).ask_many(["p1", "p2"], "Compare")
     assert {item.paper_id for item in answer.citations} == {"p1", "p2"}
     assert {item.page for item in answer.citations} == {1, 2}
+    assert answer.confidence == 0.5  # only one passage per paper after capped expansion
 
 
 def test_multi_paper_qa_adds_evidence_for_paper_missing_from_global_top_k():
@@ -207,8 +212,8 @@ def test_multi_paper_qa_adds_evidence_for_paper_missing_from_global_top_k():
             return [first]
 
         def retrieve(self, paper_id, _question, *, top_k):
-            assert paper_id == "p2" and top_k == 1
-            return [second]
+            assert paper_id in {"p1", "p2"} and top_k == 7
+            return [first] if paper_id == "p1" else [second]
 
     class Client:
         def chat(self, messages, **_kwargs):

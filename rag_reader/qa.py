@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional, Sequence
 
 from pydantic import ValidationError
 
+from observability.tracing import trace_span
 from .llm_client import DeepSeekClient
 from .errors import RAGGenerationError
 from .prompt_adapter import build_messages
@@ -44,8 +45,11 @@ class PaperQA:
         """基于指定论文的 Top-K 证据片段回答问题。"""
         paper_id = _required_text(paper_id, "paper_id")
         question = _required_text(question, "question")
-        chunks = self.retriever.retrieve(paper_id, question, top_k=self.top_k)
-        return self._answer({"paper_id": paper_id}, question, chunks)
+        from .evidence_graph import EvidenceGraph
+        chunks, outcome = EvidenceGraph(self.retriever, top_k=self.top_k).run([paper_id], question)
+        logger.info("证据检索：%s", outcome)
+        return self._answer({"paper_id": paper_id}, question, chunks,
+                            evidence_sufficient=outcome["sufficient"])
 
     def ask_many(self, paper_ids: Sequence[str], question: str) -> RAGAnswer:
         """Answer using a shared Top-K across several already indexed papers."""
@@ -53,21 +57,21 @@ class PaperQA:
         if len(ids) < 2 or len(ids) != len(set(ids)):
             raise ValueError("ask_many requires at least two distinct paper IDs")
         question = _required_text(question, "question")
-        chunks = self.retriever.retrieve_multiple(ids, question, top_k=self.top_k)
-        # A global Top-K can contain only one paper; comparisons need evidence
-        # from every selected paper when it is present in the index.
-        present = {chunk.paper_id for chunk in chunks}
-        seen = {chunk.chunk_id for chunk in chunks}
-        for paper_id in ids:
-            if paper_id in present:
-                continue
-            for chunk in self.retriever.retrieve(paper_id, question, top_k=1):
-                if chunk.chunk_id not in seen:
-                    chunks.append(chunk)
-                    seen.add(chunk.chunk_id)
-        return self._answer({"paper_ids": ids}, question, chunks)
+        from .evidence_graph import EvidenceGraph
+        chunks, outcome = EvidenceGraph(self.retriever, top_k=self.top_k).run(ids, question)
+        logger.info("跨论文证据检索：%s", outcome)
+        if outcome["absent_paper_ids"]:
+            return RAGAnswer(
+                question=question,
+                answer="以下论文没有可检索的原文片段，无法可靠地完成跨论文比较："
+                       + "、".join(outcome["absent_paper_ids"]),
+                sources=[], confidence=0.0,
+            )
+        return self._answer({"paper_ids": ids}, question, chunks,
+                            evidence_sufficient=outcome["sufficient"])
 
-    def _answer(self, scope: dict[str, Any], question: str, chunks: Sequence[Any]) -> RAGAnswer:
+    def _answer(self, scope: dict[str, Any], question: str, chunks: Sequence[Any],
+                *, evidence_sufficient: bool = True) -> RAGAnswer:
         if not chunks:
             return RAGAnswer(
                 question=question,
@@ -92,11 +96,19 @@ class PaperQA:
         }
         client = self._get_client()
         logger.info("调用 DeepSeek 论文问答：scope=%s, chunks=%d", scope, len(chunks))
-        content = client.chat(
-            build_messages(RAG_QA_PROMPT, payload),
-            temperature=0.0,
-            max_tokens=2048,
-        )
+        with trace_span("rag.answer_generation", as_type="generation", model=getattr(client, "model", "unknown"),
+                        input={"paper_ids": scope.get("paper_ids") or [scope.get("paper_id")],
+                               "chunk_ids": [chunk.chunk_id for chunk in chunks]}) as span:
+            content = client.chat(
+                build_messages(RAG_QA_PROMPT, payload),
+                temperature=0.0,
+                max_tokens=2048,
+            )
+            usage = client.get_token_usage()["last"] if hasattr(client, "get_token_usage") else {}
+            span.update(output={"answer_length": len(content)}, usage_details={
+                "input_tokens": usage.get("prompt_tokens", 0),
+                "output_tokens": usage.get("completion_tokens", 0),
+            })
         try:
             data = _extract_json(content)
             data["question"] = question
@@ -122,6 +134,8 @@ class PaperQA:
                 for source in sources
             ]
             if not sources:
+                data["confidence"] = min(float(data.get("confidence") or 0.0), 0.5)
+            if not evidence_sufficient:
                 data["confidence"] = min(float(data.get("confidence") or 0.0), 0.5)
             return RAGAnswer.model_validate(data)
         except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:

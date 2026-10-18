@@ -15,6 +15,7 @@ from rag_reader.config import RAGSettings
 from rag_reader.llm_client import DeepSeekClient
 from rag_reader.pipeline import RAGReader
 from rag_reader.store_factory import create_vector_store, milvus_index_scope
+from observability.tracing import trace_span, flush_traces
 
 
 class PaperIndexUnavailableError(RuntimeError):
@@ -52,11 +53,15 @@ class QuestionService:
             )
         llm = DeepSeekClient(**provider.client_kwargs(), timeout=provider.timeout_seconds)
         reader = RAGReader(vector_store=store, llm_client=llm, settings=settings)
-        answer = reader.ask(paper_id, question).model_dump(mode="json")
+        with trace_span("rag.question", input={"paper_ids": [paper_id]}) as span:
+            answer = reader.ask(paper_id, question).model_dump(mode="json")
+            span.update(output={"source_count": len(answer["sources"]),
+                                "confidence": answer["confidence"]})
         answer_id = uuid4().hex
         with self.database.get_session() as session:
             session.add(QuestionAnswerModel(answer_id=answer_id, paper_id=paper_id, question=question, answer=answer))
             session.commit()
+        flush_traces()
         return answer_id, answer
 
     def ask_many(self, paper_ids: list[str], question: str) -> tuple[str, dict[str, Any]]:
@@ -86,13 +91,17 @@ class QuestionService:
                 raise PaperIndexUnavailableError(f"papers absent from the current Milvus collection: {missing}")
         llm = DeepSeekClient(**provider.client_kwargs(), timeout=provider.timeout_seconds)
         reader = RAGReader(vector_store=store, llm_client=llm, settings=settings)
-        answer = reader.qa.ask_many(paper_ids, question).model_dump(mode="json")
+        with trace_span("rag.question", input={"paper_ids": paper_ids}) as span:
+            answer = reader.qa.ask_many(paper_ids, question).model_dump(mode="json")
+            span.update(output={"source_count": len(answer["sources"]),
+                                "confidence": answer["confidence"]})
         answer_id = uuid4().hex
         with self.database.get_session() as session:
             session.add(MultiPaperAnswerModel(
                 answer_id=answer_id, paper_ids=paper_ids, question=question, answer=answer,
             ))
             session.commit()
+        flush_traces()
         return answer_id, answer
 
     def evidence(self, answer_id: str) -> list[dict[str, Any]]:

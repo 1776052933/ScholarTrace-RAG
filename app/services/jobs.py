@@ -14,6 +14,7 @@ from sqlalchemy import select, update
 
 from app.api.schemas import JobListItem, JobSnapshot, ResearchOptions
 from app.storage.models import ResearchJobModel, utc_now
+from observability.tracing import flush_traces, trace_span
 from literature_database.database import DatabaseManager
 
 
@@ -309,23 +310,26 @@ class ResearchJobRunner:
                 raise WorkflowCancelled("用户已取消本次检索。")
             self.data_root.mkdir(parents=True, exist_ok=True)
             (self.data_root / "papers" / "text").mkdir(parents=True, exist_ok=True)
-            workflow = self.workflow_factory(options)
-            result = workflow.run(
-                options.query,
-                max_papers=options.max_papers,
-                download_papers=options.download_papers,
-                ingest_rag=options.enable_rag,
-                papers_directory=str(self.data_root / "papers"),
-                text_directory=str(self.data_root / "papers" / "text"),
-                download_engine=options.download_engine,
-                download_timeout=options.download_timeout,
-                retry_failed_downloads=options.retry_failed_downloads,
-                question=options.question,
-                summarize=options.summarize,
-                extract_knowledge=options.extract_knowledge,
-                publication_date_to=options.publication_date_to,
-                should_cancel=event.is_set,
-            )
+            with trace_span("research.job", input={"job_id": job_id}) as span:
+                workflow = self.workflow_factory(options)
+                result = workflow.run(
+                    options.query,
+                    max_papers=options.max_papers,
+                    download_papers=options.download_papers,
+                    ingest_rag=options.enable_rag,
+                    papers_directory=str(self.data_root / "papers"),
+                    text_directory=str(self.data_root / "papers" / "text"),
+                    download_engine=options.download_engine,
+                    download_timeout=options.download_timeout,
+                    retry_failed_downloads=options.retry_failed_downloads,
+                    question=options.question,
+                    summarize=options.summarize,
+                    extract_knowledge=options.extract_knowledge,
+                    publication_date_to=options.publication_date_to,
+                    should_cancel=event.is_set,
+                )
+                span.update(output={"job_id": job_id,
+                                    "stage_count": len(result.get("stages") or {})})
             if event.is_set():
                 raise WorkflowCancelled("用户已取消本次检索。")
             status, message = _paper_processing_outcome(result, options)
@@ -342,6 +346,7 @@ class ResearchJobRunner:
             logger.exception("研究任务失败：%s", type(exc).__name__)
             self.store.update(job_id, status="failed", stage="failed", error=_safe_message(f"{type(exc).__name__}: {exc}"), retryable=True, finished_at=utc_now())
         finally:
+            flush_traces()
             logger.removeHandler(handler)
             with self._lock:
                 self._events.pop(job_id, None)

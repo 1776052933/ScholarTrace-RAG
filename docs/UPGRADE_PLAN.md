@@ -45,7 +45,7 @@
 | app/ingestion/ | 下载、解析、清洗、切块及 Celery 任务 |
 | app/retrieval/ | embedding、Milvus/BM25、融合、重排和证据组装 |
 | app/storage/ | MySQL 模型/仓库、PDF 资源、Milvus 适配器及 Alembic 迁移 |
-| app/llm/ 与 app/observability/ | 模型适配、提示词版本和 Langfuse 追踪 |
+| app/llm/ 与 observability/ | 模型适配、提示词版本和 Langfuse 追踪 |
 | app/mcp/、Auto_Paper_UI/ | MCP 协议入口、Streamlit HTTP 客户端和界面 |
 | evaluation/、tests/、deploy/ | 固定基准、关键测试、Compose 与演示配置 |
 
