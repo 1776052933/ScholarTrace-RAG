@@ -2,22 +2,30 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import FastAPI, HTTPException, Response
+import anyio
+from fastapi import FastAPI, HTTPException, Query, Request, Response
+from starlette.concurrency import run_in_threadpool
+from starlette.responses import StreamingResponse
 from sqlalchemy import select, text
 
 from app.api.schemas import (
     IngestionRequest, JobListItem, JobSnapshot, MultiPaperQuestionRequest,
     MultiPaperQuestionResponse, PaperSummary, QuestionRequest, QuestionResponse,
-    ResearchOptions,
+    ResearchOptions, ConversationCreate, ConversationMessageRequest,
+    ConversationSummary, ConversationDetail,
 )
 from app.config import ModelSettings
 from app.services.jobs import JobBusyError, ResearchJobRunner
 from app.services.ingestions import IngestionConflictError, IngestionJobService
 from app.services.questions import QuestionService, PaperIndexUnavailableError
+from app.services.conversations import ConversationService, ConversationBusyError
+from rag_reader.errors import RAGError
 from rag_reader.config import RAGSettings
 from rag_reader.store_factory import milvus_index_scope
 from literature_database.database import DatabaseManager
@@ -40,6 +48,7 @@ def create_app(
     runner = ResearchJobRunner(database, root, workflow_factory=workflow_factory)
     ingestions = IngestionJobService(database, root, dispatch=ingestion_dispatcher)
     questions = question_service or QuestionService(database, root)
+    conversations = ConversationService(database, questions)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -53,11 +62,12 @@ def create_app(
         yield
         database.dispose()
 
-    app = FastAPI(title="ScholarTrace Research API", version="4.0.0", lifespan=lifespan)
+    app = FastAPI(title="ScholarTrace Research API", version="4.2.0", lifespan=lifespan)
     app.state.database = database
     app.state.runner = runner
     app.state.ingestions = ingestions
     app.state.questions = questions
+    app.state.conversations = conversations
     app.state.data_root = root
 
     @app.get("/api/v1/health")
@@ -177,7 +187,80 @@ def create_app(
             raise HTTPException(status_code=404, detail="answer not found") from exc
         return Response(content=report, media_type="text/markdown; charset=utf-8")
 
+    @app.post("/api/v1/conversations", status_code=201, response_model=ConversationSummary)
+    def create_conversation(body: ConversationCreate) -> dict[str, Any]:
+        try:
+            return conversations.create(body.paper_ids, body.title)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="paper not found") from exc
+        except PaperIndexUnavailableError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/v1/conversations", response_model=list[ConversationSummary])
+    def list_conversations(paper_id: list[str] | None = Query(default=None),
+                           limit: int = Query(default=20, ge=1, le=100)):
+        return conversations.recent(paper_id, limit)
+
+    @app.get("/api/v1/conversations/{conversation_id}", response_model=ConversationDetail)
+    def get_conversation(conversation_id: str, limit: int = Query(default=50, ge=1, le=100),
+                         before: int | None = Query(default=None, ge=1)):
+        try:
+            return conversations.get(conversation_id, limit=limit, before=before)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="conversation not found") from exc
+
+    @app.post("/api/v1/conversations/{conversation_id}/messages/stream", response_class=StreamingResponse, responses={
+        200: {"description": "meta/status/delta/done/error SSE events; only done confirms persistence",
+              "content": {"text/event-stream": {"schema": {"type": "string"}}}},
+        409: {"description": "Conversation busy or paper index unavailable"},
+    })
+    async def stream_conversation(conversation_id: str, body: ConversationMessageRequest,
+                                  request: Request):
+        try:
+            turn = await run_in_threadpool(conversations.begin, conversation_id, body.question)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="conversation or paper not found") from exc
+        except (ConversationBusyError, PaperIndexUnavailableError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        iterator = conversations.stream(turn)
+
+        async def events():
+            finished = False
+            try:
+                while True:
+                    event = await run_in_threadpool(_next_event, iterator)
+                    if event is None or await request.is_disconnected():
+                        break
+                    if event["event"] == "done":
+                        finished = True
+                    yield _sse(event)
+            except Exception as exc:
+                logging.getLogger(__name__).exception("Conversation stream failed: %s", turn.turn_id)
+                message = str(exc) if isinstance(exc, (RAGError, ConversationBusyError)) else "生成失败，请重试。"
+                yield _sse({"event": "error", "data": {
+                    "turn_id": turn.turn_id, "message": message, "retryable": True,
+                }})
+            finally:
+                # Starlette cancels response tasks on disconnect. Shield cleanup so an abandoned
+                # response cannot leave the conversation locked or enter successful history.
+                with anyio.CancelScope(shield=True):
+                    await run_in_threadpool(iterator.close)
+                    if not finished:
+                        await run_in_threadpool(conversations.fail, turn, "cancelled", "连接已断开，本轮未完成。")
+
+        return StreamingResponse(events(), media_type="text/event-stream", headers={
+            "Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+        })
+
     return app
+
+
+def _next_event(iterator):
+    return next(iterator, None)
+
+
+def _sse(event):
+    return f"event: {event['event']}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
 
 
 app = create_app()

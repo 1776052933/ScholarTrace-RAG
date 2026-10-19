@@ -1,6 +1,7 @@
 """基于 OpenAI 兼容 Python SDK 构建的 DeepSeek 客户端。"""
 
 import json
+from ai_components.chains import generate_text
 import os
 from typing import Any, Dict, List, Mapping, Optional, Protocol
 
@@ -115,7 +116,7 @@ class DeepSeekClient:
 
     def complete_json(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         """流水线适配方法：请求 DeepSeek 返回 JSON 并解码。"""
-        content = self.chat(
+        content = generate_text(self,
             [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},

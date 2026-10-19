@@ -1,6 +1,7 @@
 """使用 DeepSeek 从论文正文抽取结构化科研知识。"""
 
 import json
+from ai_components.chains import generate_text
 import logging
 import re
 from threading import Lock
@@ -60,7 +61,7 @@ class PaperKnowledgeExtractor:
         client = self._get_client()
         payload = {"title": document.title, "content": content}
         logger.info("调用 DeepSeek 抽取论文知识：paper_id=%s", document.paper_id)
-        response = client.chat(
+        response = generate_text(client,
             build_messages(PAPER_EXTRACTION_PROMPT, payload),
             temperature=0.0,
             max_tokens=3000,

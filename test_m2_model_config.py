@@ -20,8 +20,8 @@ def test_model_settings_are_shared_across_agents(tmp_path):
     clients = [
         workflow.query_understanding.llm_client,
         workflow.query_decomposition.llm_client,
-        workflow.search_agent.planner.llm_client,
-        workflow.search_agent.evaluator.llm_client,
+        workflow.search_agent.agent.planner.llm_client,
+        workflow.search_agent.agent.evaluator.llm_client,
         workflow.ranking_agent.evaluator.llm_client,
     ]
     assert all(client.model == "test-model" for client in clients)

@@ -1,6 +1,7 @@
 """使用 OpenAI Python SDK 封装 DeepSeek Chat API。"""
 
 import json
+from ai_components.chains import generate_text
 import os
 import re
 from typing import Any, Dict, List, Mapping, Optional
@@ -132,7 +133,7 @@ class DeepSeekClient:
         max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         """发送 system/user 消息并将模型文本解析为 JSON 对象。"""
-        content = self.chat(
+        content = generate_text(self,
             [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},

@@ -8,6 +8,7 @@ from langgraph.graph import END, START, StateGraph
 
 from observability.tracing import trace_span
 from rag_reader.schema import DocumentChunk
+from rag_reader.langchain_retriever import ScopedPaperRetriever, to_chunk
 
 
 class EvidenceState(TypedDict, total=False):
@@ -60,12 +61,12 @@ class EvidenceGraph:
         graph.add_edge("finish", END)
         self.graph = graph.compile()
 
-    def run(self, paper_ids: list[str], question: str) -> tuple[list[DocumentChunk], dict[str, Any]]:
+    def run(self, paper_ids: list[str], question: str, *, config=None) -> tuple[list[DocumentChunk], dict[str, Any]]:
         with trace_span("rag.evidence_graph", input={"paper_ids": paper_ids}) as span:
             state = self.graph.invoke({
                 "paper_ids": paper_ids, "question": question, "top_k": self.top_k,
                 "chunks": [], "missing_ids": [], "rounds": 0,
-            })
+            }, config=config)
             span.update(output={"chunk_count": len(state["chunks"]),
                                 "expansions": state["rounds"],
                                 "stop_reason": state["stop_reason"]})
@@ -77,6 +78,10 @@ class EvidenceGraph:
             "chunk_count": len(chunks),
         }
 
+    def _retrieve_chunks(self, ids, question, top_k):
+        retriever = ScopedPaperRetriever(backend=self.retriever, paper_ids=tuple(ids), top_k=top_k)
+        return [to_chunk(document) for document in retriever.invoke(question)]
+
     def _retrieve(self, state: EvidenceState) -> dict[str, Any]:
         ids = state["paper_ids"]
         if self.strategy == "balanced" and len(ids) > 1:
@@ -86,16 +91,12 @@ class EvidenceGraph:
             chunks = []
             seen = set()
             for paper_id in ids:
-                for chunk in self.retriever.retrieve(paper_id, state["question"], top_k=per_paper):
+                for chunk in self._retrieve_chunks([paper_id], state["question"], per_paper):
                     if chunk.chunk_id not in seen:
                         chunks.append(chunk)
                         seen.add(chunk.chunk_id)
             return {"chunks": [chunk.model_dump(mode="json") for chunk in chunks]}
-        found = (
-            self.retriever.retrieve(ids[0], state["question"], top_k=state["top_k"])
-            if len(ids) == 1 else
-            self.retriever.retrieve_multiple(ids, state["question"], top_k=state["top_k"])
-        )
+        found = self._retrieve_chunks(ids, state["question"], state["top_k"])
         return {"chunks": [chunk.model_dump(mode="json") for chunk in found]}
 
     @staticmethod
@@ -118,7 +119,7 @@ class EvidenceGraph:
         limit = min(8, max(2, state["top_k"] + 2 * (state["rounds"] + 1)))
         for paper_id in state["missing_ids"]:
             needed = 2 - sum(chunk.paper_id == paper_id for chunk in chunks)
-            for chunk in self.retriever.retrieve(paper_id, state["question"], top_k=limit):
+            for chunk in self._retrieve_chunks([paper_id], state["question"], limit):
                 if chunk.chunk_id not in seen:
                     chunks.append(chunk)
                     seen.add(chunk.chunk_id)

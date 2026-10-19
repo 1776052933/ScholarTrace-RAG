@@ -8,6 +8,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from pydantic import ValidationError
 
+from ai_components.chains import generate_text
+
 from .llm_client import DeepSeekClient
 from .prompts import QUERY_ANALYSIS_PROMPT
 from .schema import Entity, QueryAnalysis, QueryConstraints, QueryIntent, ResearchEntity, TimeConstraint
@@ -49,7 +51,7 @@ class QueryParser:
             {"role": "user", "content": query},
         ]
         try:
-            response_text = client.chat(messages)
+            response_text = generate_text(client,messages)
             payload, repaired = _extract_json_object(response_text)
             if repaired:
                 logger.warning("DeepSeek 响应包含非 JSON 包装，已自动提取 JSON 对象")

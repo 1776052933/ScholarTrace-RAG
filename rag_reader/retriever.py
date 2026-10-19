@@ -68,7 +68,8 @@ class PaperRetriever:
             self.vector_store.prepare_bm25()
             vector = None
         else:
-            vector = self.embedding_model.embed(question)
+            embed = getattr(self.embedding_model, "embed_query", None) or self.embedding_model.embed
+            vector = embed(question)
             if hasattr(self.vector_store, "ensure_embedding_compatible"):
                 self.vector_store.ensure_embedding_compatible(
                     embedding_fingerprint(self.embedding_model), len(vector)

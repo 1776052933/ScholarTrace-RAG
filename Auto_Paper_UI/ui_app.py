@@ -20,10 +20,7 @@ from api_client import (
     RunOptions,
     WorkflowRunError,
     api_status,
-    ask_multiple_papers,
-    ask_paper_question,
     cancel_workflow,
-    export_answer,
     paper_library,
     poll_workflow,
     recent_workflows,
@@ -42,6 +39,7 @@ from reporting import (
     selected_papers,
     stage_times,
 )
+from conversation_panel import render_answer, render_conversation
 
 
 st.set_page_config(
@@ -1112,80 +1110,15 @@ def render_interactive_qa(
     *,
     deepseek_api_key: str | None,
 ) -> None:
-    paper_id = str(paper.get("paper_id") or "")
-    history = output.setdefault("interactive_answers", [])
-    if not isinstance(history, list):
-        history = []
-        output["interactive_answers"] = history
-    form_key = str(abs(hash(paper_id)))
-
-    with st.form(f"paper_question_{form_key}", clear_on_submit=True):
-        question = st.text_area(
-            "向当前论文提问",
-            placeholder="例如：论文使用了哪些数据集和评价指标？",
-            height=88,
-        )
-        submitted = st.form_submit_button(
-            "发送问题",
-            type="primary",
-            use_container_width=False,
-        )
-
-    if submitted:
-        if not question.strip():
-            st.warning("请输入问题。")
-        else:
-            try:
-                with st.spinner("正在检索论文证据并生成回答"):
-                    answer = ask_paper_question(
-                        paper_id,
-                        question,
-                        deepseek_api_key=deepseek_api_key,
-                    )
-                history.append(answer)
-            except Exception as exc:
-                st.error(f"问答失败：{type(exc).__name__}: {exc}")
-
-    answers = []
-    original_answer = output.get("answer")
-    if isinstance(original_answer, dict):
-        answers.append(original_answer)
-    answers.extend(item for item in history if isinstance(item, dict))
-    if not answers:
-        st.info("还没有向这篇论文提出问题。")
-    for answer in answers:
+    for answer in [output.get("answer"), *(output.get("interactive_answers") or [])]:
+        if not isinstance(answer, dict):
+            continue
         with st.chat_message("user"):
             st.write(answer.get("question") or "")
         with st.chat_message("assistant"):
-            st.write(answer.get("answer") or "")
-            confidence = answer.get("confidence")
-            if confidence is not None:
-                st.caption(f"回答置信度：{confidence}")
-            citations = [
-                item for item in answer.get("citations") or []
-                if isinstance(item, dict)
-            ]
-            sources = answer.get("sources") or []
-            if citations:
-                with st.expander(f"证据片段（{len(citations)}）"):
-                    for index, citation in enumerate(citations, start=1):
-                        st.markdown(f"**{index}. {citation.get('title') or '论文证据'}**")
-                        location = []
-                        if citation.get("paper_id"):
-                            location.append(str(citation["paper_id"]))
-                        if citation.get("page") is not None:
-                            location.append(f"第 {citation['page']} 页")
-                        if citation.get("section"):
-                            location.append(str(citation["section"]))
-                        if citation.get("chunk_id"):
-                            location.append(str(citation["chunk_id"]))
-                        if location:
-                            st.caption(" · ".join(location))
-                        st.write(str(citation.get("excerpt") or ""))
-            elif sources:
-                with st.expander(f"证据片段（{len(sources)}）"):
-                    for source in sources:
-                        st.code(str(source), language="text")
+            render_answer(answer)
+    render_conversation([str(paper.get("paper_id") or "")], key="paper",
+                        question_label="向当前论文提问", submit_label="发送问题")
     if output.get("answer_error"):
         st.error(str(output["answer_error"]))
 
@@ -1498,37 +1431,19 @@ def render_library() -> None:
             return
         ready = {str(item["paper_id"]): item for item in papers
                  if item.get("embedding_status") == "COMPLETED"}
-        st.caption(f"已入库且可问答：{len(ready)} 篇。请选择 2–5 篇进行跨论文提问。")
+        st.caption(f"已入库且可问答：{len(ready)} 篇。请选择 1–5 篇开始连续问答。")
         if not ready:
             st.info("论文库暂无可问答论文。")
             return
         selected = st.multiselect(
             "论文库", list(ready),
-            format_func=lambda paper_id: str(ready[paper_id].get("title") or paper_id),
-            placeholder="请选择 2–5 篇论文",
+            format_func=lambda paper_id: f"{ready[paper_id].get('title') or '未命名论文'} · {paper_id}",
+            placeholder="请选择 1–5 篇论文",
             key="library_multi_papers", max_selections=5,
         )
-        question = st.text_input("跨论文问题", key="library_multi_question")
-        if st.button("根据所选论文回答", disabled=len(selected) < 2 or not question.strip()):
-            try:
-                st.session_state["multi_paper_answer"] = ask_multiple_papers(selected, question.strip())
-            except WorkflowRunError as exc:
-                st.error(str(exc))
-        response = st.session_state.get("multi_paper_answer")
-        if isinstance(response, dict):
-            answer = response.get("answer") or {}
-            st.markdown(str(answer.get("answer") or "根据提供的论文片段无法确定。"))
-            for citation in answer.get("citations") or []:
-                if isinstance(citation, dict):
-                    with st.expander(f"{citation.get('title') or citation.get('paper_id')} · 第 {citation.get('page') or '?'} 页"):
-                        st.write(citation.get("excerpt") or "")
-            try:
-                report = export_answer(str(response["answer_id"]))
-            except WorkflowRunError as exc:
-                st.warning(str(exc))
-            else:
-                st.download_button("导出本次问答", report.encode("utf-8"),
-                                   file_name="scholartrace_multi_paper_answer.md", mime="text/markdown")
+        if selected:
+            render_conversation(selected, key="library", question_label="论文问题",
+                                submit_label="根据所选论文回答")
 
 
 def main() -> None:

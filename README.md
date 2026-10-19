@@ -4,12 +4,15 @@
 
 M2 已接入 FastAPI、MySQL/Alembic 和 Streamlit HTTP 客户端；M3 已完成 Milvus 检索消融和复杂 PDF 首轮对照；M4 已接入 Redis/Celery 选文入库、失败重试和多论文证据问答；M5 接入 LangGraph 搜索与证据补检工作流、MCP 服务及可选的 Langfuse 追踪。M6 加入固定留出集消融、跨论文证据对照、离线 Ragas、人工复核表和 GitHub Actions。先看 [M6 评测报告](docs/M6_REPORT.md)与[M6 运行及演示](docs/M6_RUN_AND_ACCEPTANCE.md)；此前阶段见 [M5 运行与验收](docs/M5_RUN_AND_ACCEPTANCE.md)、[M4 运行与验收](docs/M4_RUN_AND_ACCEPTANCE.md)、[M3 运行与验收](docs/M3_RUN_AND_ACCEPTANCE.md)和[升级计划](docs/UPGRADE_PLAN.md)。数据集位置见[数据集说明](docs/DATASETS.md)；[M0 评测说明](evaluation/M0.md)、[M0 十题基线](evaluation/M0_BASELINE.md)和[M1 对照](evaluation/M1_COMPARISON.md)可用于同输入复测。[版本归档与 M1 工程验收](docs/VERSION_ARCHIVE_AND_M1_ACCEPTANCE.md)记录了早期源码和验收边界。
 
-项目采用模块化工作流。LangGraph 编排 `SearchAgent` 的规划、检索、评价和多轮调整，并控制 RAG 证据补检；其他以 Agent 命名的模块承担排序等职责。当前实现没有多个自主 Agent 之间的任务委派与协作机制。
+核心 AI 流程已统一为 [LangChain 组件接口与 LangGraph 工作流](docs/LANGCHAIN_ARCHITECTURE.md)：模型生成使用共享 LCEL 链，检索与嵌入提供标准接口；论文发现图编排理解、拆解、搜索、可选引文扩展与排序，问答图编排改写、证据检索、上下文控制、生成与引用校验。FastAPI、MySQL、Celery 保留应用层职责。当前实现没有多个自主 Agent 之间的任务委派与协作机制。
+
+现已增加[连续对话与流式回答](docs/CONVERSATIONS_AND_STREAMING.md)：MySQL 保存会话和轮次，追问结合近期历史改写后重新检索原文，FastAPI 通过 SSE 实时传递回答正文，Streamlit 支持历史恢复与引用导出。上下文设有字符预算；断流或生成失败的轮次不进入有效历史。
 
 ## 主要模块
 
 | 目录 | 职责 |
 | --- | --- |
+| `ai_components/` | LangChain ChatModel 适配与共享 LCEL 生成链 |
 | `query_understanding/`、`query_decomposition/` | 理解和拆解研究问题 |
 | `search_agent/` | 搜索 Google Scholar、arXiv、OpenAlex，并扩展引文关系 |
 | `ranking_agent/` | 用 BGE-M3、元数据特征和大模型评分排序论文 |
@@ -19,7 +22,7 @@ M2 已接入 FastAPI、MySQL/Alembic 和 Streamlit HTTP 客户端；M3 已完成
 | `Auto_Paper_UI/` | Streamlit HTTP 界面、候选选文、入库进度、多论文问答与导出 |
 | `app/api/`、`app/services/`、`app/tasks.py` | FastAPI 契约、MySQL 持久化状态、Celery 入库、论文问答与领域工作流 |
 | `app/storage/`、`migrations/` | MySQL 业务表和 Alembic 迁移 |
-| `app/workflows/`、`app/mcp/`、`observability/` | LangGraph 搜索与证据图、MCP 工具、Langfuse 追踪 |
+| `app/workflows/`、`app/mcp/`、`observability/` | LangGraph 论文发现与搜索图、MCP 工具、Langfuse 追踪 |
 
 ## 运行
 

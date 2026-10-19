@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 import logging
 import os
 from threading import Lock
-from typing import Any, List, Mapping, Optional
+from typing import Any, Iterator, List, Mapping, Optional
 
 try:
     from openai import APIConnectionError, APITimeoutError, OpenAI, OpenAIError
@@ -162,6 +162,53 @@ class DeepSeekClient:
                 "total": self.total_usage.to_dict(),
             }
 
+    def stream_chat(self, messages: List[Mapping[str, Any]], *,
+                    temperature: float = 0.0, max_tokens: int = 2048) -> Iterator[str]:
+        """Yield provider deltas immediately; never replay a partially delivered call."""
+        _validate_messages(messages)
+        if not 0 <= float(temperature) <= 2:
+            raise ValueError("temperature must be between 0 and 2")
+        if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens <= 0:
+            raise ValueError("max_tokens must be a positive integer")
+        stream = None
+        usage = TokenUsage()
+        finished = None
+        has_content = False
+        try:
+            stream = self._client.chat.completions.create(
+                model=self.model, messages=messages, temperature=float(temperature),
+                max_tokens=max_tokens, timeout=self.timeout, stream=True,
+                stream_options={"include_usage": True},
+            )
+            for chunk in stream:
+                if getattr(chunk, "usage", None) is not None:
+                    usage = _token_usage(chunk.usage)
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                if choice.finish_reason:
+                    finished = choice.finish_reason
+                content = choice.delta.content
+                if content:
+                    has_content = True
+                    yield str(content)
+            if finished != "stop":
+                raise DeepSeekResponseError(f"DeepSeek stream ended without a complete answer ({finished})")
+            if not has_content:
+                raise DeepSeekResponseError("DeepSeek returned empty content")
+        except (APITimeoutError, TimeoutError) as exc:
+            raise DeepSeekTimeoutError("DeepSeek stream timed out") from exc
+        except (APIConnectionError, ConnectionError, OSError) as exc:
+            raise DeepSeekNetworkError("DeepSeek stream connection failed") from exc
+        except OpenAIError as exc:
+            raise DeepSeekAPIError("DeepSeek streaming API request failed") from exc
+        except (AttributeError, IndexError, KeyError, TypeError) as exc:
+            raise DeepSeekResponseError("DeepSeek returned an invalid stream structure") from exc
+        finally:
+            self._record_usage(usage)
+            if stream is not None:
+                stream.close()
+
     def reset_token_usage(self) -> None:
         """清零最近一次及累计 token 统计。"""
         with self._usage_lock:
@@ -235,6 +282,9 @@ class LazyDeepSeekClient:
 
     def chat(self, messages: List[Mapping[str, Any]], **kwargs: Any) -> str:
         return self._get_client().chat(messages, **kwargs)
+
+    def stream_chat(self, messages: List[Mapping[str, Any]], **kwargs: Any) -> Iterator[str]:
+        yield from self._get_client().stream_chat(messages, **kwargs)
 
     def get_token_usage(self) -> dict[str, dict[str, int]]:
         if self._client is None:

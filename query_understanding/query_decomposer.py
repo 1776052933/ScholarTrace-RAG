@@ -6,6 +6,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ai_components.chains import generate_text
+
 from .llm_client import DeepSeekClient
 from .prompts import QUERY_DECOMPOSE_PROMPT
 from .query_parser import _extract_json_object
@@ -71,7 +73,7 @@ class QueryDecomposer:
             f"待拆解的查询分析如下：\n{analysis.to_json()}"
         )
         try:
-            response_text = client.chat(
+            response_text = generate_text(client,
                 [
                     {"role": "system", "content": QUERY_DECOMPOSE_PROMPT},
                     {"role": "user", "content": user_content},

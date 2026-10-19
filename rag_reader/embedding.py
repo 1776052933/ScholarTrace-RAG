@@ -7,6 +7,8 @@ import re
 from threading import Lock
 from typing import Any, ClassVar, Dict, Iterable, List, Optional, Tuple
 
+from langchain_core.embeddings import Embeddings
+
 from .schema import DocumentChunk
 from .errors import RAGModelError
 
@@ -20,7 +22,7 @@ class EmbeddingLoadError(RAGModelError):
 
 
 
-class EmbeddingModel:
+class EmbeddingModel(Embeddings):
     """支持中英文论文内容的 BGE-M3 向量模型。"""
 
     _model_cache: ClassVar[Dict[Tuple[str, Optional[str]], Any]] = {}
@@ -52,6 +54,9 @@ class EmbeddingModel:
         except (AttributeError, IndexError, KeyError, TypeError):
             revision = "unknown"
         return f"{self.model_name}@{revision}|normalized={int(self.normalize_embeddings)}"
+    def embed_query(self, text: str) -> List[float]:
+        return self.embed(text)
+
     def embed(self, text: str) -> List[float]:
         """将一段中文或英文文本编码为一维浮点向量。"""
         if not isinstance(text, str):
@@ -75,8 +80,15 @@ class EmbeddingModel:
             if not isinstance(chunk, DocumentChunk):
                 raise TypeError(f"chunks[{index}] must be a DocumentChunk")
 
+        return self.embed_documents([chunk.text for chunk in values])
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        if not texts:
+            return []
+        if any(not isinstance(text, str) or not text.strip() for text in texts):
+            raise ValueError("embedding documents must contain non-empty text")
         embeddings = self._get_model().encode(
-            [chunk.text for chunk in values],
+            texts,
             batch_size=self.batch_size,
             convert_to_numpy=True,
             normalize_embeddings=self.normalize_embeddings,
@@ -84,7 +96,7 @@ class EmbeddingModel:
         )
         if hasattr(embeddings, "tolist"):
             embeddings = embeddings.tolist()
-        if not isinstance(embeddings, (list, tuple)) or len(embeddings) != len(values):
+        if not isinstance(embeddings, (list, tuple)) or len(embeddings) != len(texts):
             raise TypeError("sentence-transformers returned an invalid embedding batch")
         return [_vector(vector) for vector in embeddings]
 

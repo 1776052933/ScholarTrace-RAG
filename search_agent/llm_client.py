@@ -1,6 +1,7 @@
 """供 Search Planner、Evaluator 和 Reflector 使用的 DeepSeek 客户端。"""
 
 import json
+from ai_components.chains import generate_text
 import logging
 import os
 import re
@@ -139,7 +140,7 @@ class DeepSeekClient:
         max_tokens: int = 2048,
     ) -> Dict[str, Any]:
         """供 Planner、Evaluator、Reflector 获取结构化 JSON 响应。"""
-        content = self.chat(
+        content = generate_text(self,
             [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},

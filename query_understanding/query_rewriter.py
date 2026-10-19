@@ -6,6 +6,8 @@ from typing import Iterable, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ai_components.chains import generate_text
+
 from .llm_client import DeepSeekClient
 from .prompts import QUERY_REWRITE_PROMPT
 from .query_parser import _extract_json_object
@@ -51,7 +53,7 @@ class QueryRewriter:
             f"arXiv 和 OpenAlex。\n查询分析如下：\n{analysis.to_json()}"
         )
         try:
-            response_text = client.chat(
+            response_text = generate_text(client,
                 [
                     {"role": "system", "content": QUERY_REWRITE_PROMPT},
                     {"role": "user", "content": user_content},

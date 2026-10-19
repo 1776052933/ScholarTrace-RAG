@@ -1,6 +1,7 @@
 """使用 DeepSeek 评价候选论文与科研查询的匹配程度。"""
 
 import json
+from ai_components.chains import generate_text
 import logging
 import os
 import re
@@ -79,7 +80,7 @@ class PaperEvaluator:
             "paper": paper.model_dump(mode="json"),
         }
         logger.info("调用 DeepSeek 评价论文：%s", paper.paper_id)
-        content = client.chat(
+        content = generate_text(client,
             [
                 {"role": "system", "content": PAPER_EVALUATION_PROMPT},
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -142,7 +143,7 @@ class PaperEvaluator:
             }
             logger.info("调用 DeepSeek 批量评价论文：%d 篇", len(missing))
             try:
-                content = client.chat(
+                content = generate_text(client,
                     [
                         {"role": "system", "content": PAPER_BATCH_EVALUATION_PROMPT},
                         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},

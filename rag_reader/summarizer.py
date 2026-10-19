@@ -1,6 +1,7 @@
 """使用 DeepSeek 生成结构化论文总结。"""
 
 import json
+from ai_components.chains import generate_text
 import logging
 import re
 from threading import Lock
@@ -73,7 +74,7 @@ class PaperSummarizer:
         client = self._get_client()
         payload = {"title": title, "content": content}
         logger.info("调用 DeepSeek 生成论文总结：title=%s", title)
-        response = client.chat(
+        response = generate_text(client,
             build_messages(SUMMARY_PROMPT, payload),
             temperature=0.1,
             max_tokens=2500,

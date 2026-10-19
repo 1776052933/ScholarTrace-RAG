@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import asdict, dataclass
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 
@@ -125,3 +127,60 @@ def ask_paper_question(paper_id: str, question: str, *, deepseek_api_key: str | 
         raise WorkflowRunError("M2 的模型密钥在 API 服务端配置")
     response = _request("POST", "/api/v1/questions", payload={"paper_id": paper_id, "question": question}, timeout=240.0)
     return dict(response["answer"])
+
+
+def create_conversation(paper_ids: list[str]) -> dict[str, Any]:
+    return dict(_request("POST", "/api/v1/conversations", payload={"paper_ids": paper_ids}))
+
+
+def recent_conversations(paper_ids: list[str]) -> list[dict[str, Any]]:
+    query = urlencode([("paper_id", value) for value in paper_ids])
+    return list(_request("GET", f"/api/v1/conversations?{query}"))
+
+
+def get_conversation(conversation_id: str, *, before: int | None = None) -> dict[str, Any]:
+    suffix = f"?before={before}" if before is not None else ""
+    return dict(_request("GET", f"/api/v1/conversations/{conversation_id}{suffix}"))
+
+
+def stream_conversation(conversation_id: str, question: str):
+    """Consume POST SSE as it arrives; a missing final done event is a failed exchange."""
+    done = False
+    try:
+        timeout = httpx.Timeout(240.0, connect=10.0)
+        with httpx.Client(base_url=_base_url(), timeout=timeout) as client:
+            with client.stream("POST", f"/api/v1/conversations/{conversation_id}/messages/stream",
+                               json={"question": question}, headers={"Accept": "text/event-stream"}) as response:
+                if response.is_error:
+                    response.read()
+                    try:
+                        detail = response.json().get("detail")
+                    except ValueError:
+                        detail = None
+                    raise WorkflowRunError(str(detail or f"API 返回 HTTP {response.status_code}"))
+                if "text/event-stream" not in response.headers.get("content-type", ""):
+                    raise WorkflowRunError("API 未返回有效的问答事件流。")
+                event, data = "message", []
+                for line in response.iter_lines():
+                    if line.startswith(":"):
+                        continue
+                    if not line:
+                        if data:
+                            payload = json.loads("\n".join(data))
+                            if not isinstance(payload, dict):
+                                raise ValueError("invalid SSE event payload")
+                            if event == "error":
+                                raise WorkflowRunError(str(payload.get("message") or "回答生成失败"))
+                            done = event == "done"
+                            yield {"event": event, "data": payload}
+                            if done:
+                                return
+                        event, data = "message", []
+                    elif line.startswith("event:"):
+                        event = line[6:].strip()
+                    elif line.startswith("data:"):
+                        data.append(line[5:].lstrip(" "))
+        if not done:
+            raise WorkflowRunError("回答连接提前结束，本轮未确认完成，请刷新会话后重试。")
+    except (httpx.HTTPError, ValueError) as exc:
+        raise WorkflowRunError(f"回答流连接失败：{exc}") from exc

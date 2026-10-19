@@ -5,8 +5,6 @@ from pathlib import Path
 from uuid import uuid4
 from typing import Any
 
-from sqlalchemy import select
-
 from app.storage.models import MultiPaperAnswerModel, QuestionAnswerModel
 from app.config import ModelSettings
 from literature_database.database import DatabaseManager
@@ -28,31 +26,7 @@ class QuestionService:
         self.data_root = Path(data_root)
 
     def ask(self, paper_id: str, question: str) -> tuple[str, dict[str, Any]]:
-        settings = RAGSettings.from_env()
-        with self.database.get_session() as session:
-            paper = session.get(PaperModel, paper_id)
-            if paper is None:
-                raise KeyError(paper_id)
-            if settings.vector_backend == "milvus" and (
-                paper.embedding_status.casefold() != "completed"
-                or not (paper.index_signature or "").startswith(milvus_index_scope(settings) + ":")
-            ):
-                raise PaperIndexUnavailableError(
-                    f"paper {paper_id} has not been rebuilt in the current Milvus index"
-                )
-        provider = ModelSettings.from_env()
-        settings = settings.model_copy(update={
-            "llm_model": provider.model,
-            "llm_base_url": provider.base_url,
-            "llm_timeout_seconds": provider.timeout_seconds,
-        })
-        store = create_vector_store(settings, chroma_directory=str(self.data_root / "chroma"))
-        if settings.vector_backend == "milvus" and not store.has_paper(paper_id):
-            raise PaperIndexUnavailableError(
-                f"paper {paper_id} is absent from the current Milvus collection"
-            )
-        llm = DeepSeekClient(**provider.client_kwargs(), timeout=provider.timeout_seconds)
-        reader = RAGReader(vector_store=store, llm_client=llm, settings=settings)
+        reader = self.reader_for([paper_id])
         with trace_span("rag.question", input={"paper_ids": [paper_id]}) as span:
             answer = reader.ask(paper_id, question).model_dump(mode="json")
             span.update(output={"source_count": len(answer["sources"]),
@@ -67,30 +41,7 @@ class QuestionService:
     def ask_many(self, paper_ids: list[str], question: str) -> tuple[str, dict[str, Any]]:
         if len(paper_ids) < 2 or len(paper_ids) > 5 or len(set(paper_ids)) != len(paper_ids):
             raise ValueError("select two to five distinct papers")
-        settings = RAGSettings.from_env()
-        with self.database.get_session() as session:
-            for paper_id in paper_ids:
-                paper = session.get(PaperModel, paper_id)
-                if paper is None:
-                    raise KeyError(paper_id)
-                if settings.vector_backend == "milvus" and (
-                    paper.embedding_status.casefold() != "completed"
-                    or not (paper.index_signature or "").startswith(milvus_index_scope(settings) + ":")
-                ):
-                    raise PaperIndexUnavailableError(f"paper {paper_id} is not ready in the current Milvus index")
-        provider = ModelSettings.from_env()
-        settings = settings.model_copy(update={
-            "llm_model": provider.model,
-            "llm_base_url": provider.base_url,
-            "llm_timeout_seconds": provider.timeout_seconds,
-        })
-        store = create_vector_store(settings, chroma_directory=str(self.data_root / "chroma"))
-        if settings.vector_backend == "milvus":
-            missing = [paper_id for paper_id in paper_ids if not store.has_paper(paper_id)]
-            if missing:
-                raise PaperIndexUnavailableError(f"papers absent from the current Milvus collection: {missing}")
-        llm = DeepSeekClient(**provider.client_kwargs(), timeout=provider.timeout_seconds)
-        reader = RAGReader(vector_store=store, llm_client=llm, settings=settings)
+        reader = self.reader_for(paper_ids)
         with trace_span("rag.question", input={"paper_ids": paper_ids}) as span:
             answer = reader.qa.ask_many(paper_ids, question).model_dump(mode="json")
             span.update(output={"source_count": len(answer["sources"]),
@@ -103,6 +54,39 @@ class QuestionService:
             session.commit()
         flush_traces()
         return answer_id, answer
+
+    def validate_papers(self, paper_ids: list[str]) -> list[dict[str, str]]:
+        settings = RAGSettings.from_env()
+        titles = []
+        with self.database.get_session() as session:
+            for paper_id in paper_ids:
+                paper = session.get(PaperModel, paper_id)
+                if paper is None:
+                    raise KeyError(paper_id)
+                if settings.vector_backend == "milvus" and (
+                    paper.embedding_status.casefold() != "completed"
+                    or not (paper.index_signature or "").startswith(milvus_index_scope(settings) + ":")
+                ):
+                    raise PaperIndexUnavailableError(f"paper {paper_id} has not been rebuilt in the current Milvus index")
+                titles.append({"paper_id": paper_id, "title": paper.title})
+        return titles
+
+    def reader_for(self, paper_ids: list[str]) -> RAGReader:
+        self.validate_papers(paper_ids)
+        settings = RAGSettings.from_env()
+        provider = ModelSettings.from_env()
+        settings = settings.model_copy(update={
+            "llm_model": provider.model,
+            "llm_base_url": provider.base_url,
+            "llm_timeout_seconds": provider.timeout_seconds,
+        })
+        store = create_vector_store(settings, chroma_directory=str(self.data_root / "chroma"))
+        if settings.vector_backend == "milvus":
+            missing = [paper_id for paper_id in paper_ids if not store.has_paper(paper_id)]
+            if missing:
+                raise PaperIndexUnavailableError(f"papers absent from the current Milvus collection: {missing}")
+        llm = DeepSeekClient(**provider.client_kwargs(), timeout=provider.timeout_seconds)
+        return RAGReader(vector_store=store, llm_client=llm, settings=settings)
 
     def evidence(self, answer_id: str) -> list[dict[str, Any]]:
         with self.database.get_session() as session:

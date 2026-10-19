@@ -133,3 +133,57 @@ class PaperSummary(BaseModel):
     year: int | None
     availability: str
     embedding_status: str
+
+
+class ConversationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    paper_ids: list[str] = Field(min_length=1, max_length=5)
+    title: str | None = Field(default=None, max_length=200)
+
+    @field_validator("paper_ids")
+    @classmethod
+    def unique_ids(cls, values: list[str]) -> list[str]:
+        cleaned = [value.strip() for value in values]
+        if any(not value or len(value) > 255 for value in cleaned) or len(set(cleaned)) != len(cleaned):
+            raise ValueError("paper_ids must be distinct non-empty IDs of at most 255 characters")
+        return cleaned
+
+
+class ConversationMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("question")
+    @classmethod
+    def clean_question(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("question must not be empty")
+        return value
+
+
+class ConversationSummary(BaseModel):
+    conversation_id: str
+    title: str
+    paper_ids: list[str]
+    turn_count: int
+    active_turn_id: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationTurn(BaseModel):
+    turn_id: str
+    turn_number: int
+    status: Literal["generating", "completed", "failed", "cancelled", "interrupted"]
+    question: str
+    retrieval_question: str | None
+    answer: dict[str, Any] | None
+    context: dict[str, Any]
+    error: str | None
+    created_at: datetime
+
+
+class ConversationDetail(ConversationSummary):
+    has_older: bool
+    turns: list[ConversationTurn]

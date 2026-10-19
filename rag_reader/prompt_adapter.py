@@ -20,12 +20,19 @@ def _template(system_prompt: str) -> ChatPromptTemplate:
     ])
 
 
-def build_messages(system_prompt: str, payload: Mapping[str, Any]) -> list[dict[str, str]]:
+def build_messages(system_prompt: str, payload: Mapping[str, Any], *,
+                   history: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
     """Render a project prompt to the existing DeepSeek chat message contract."""
     formatted = _template(system_prompt).format_messages(
         payload=json.dumps(dict(payload), ensure_ascii=False)
     )
-    return [
+    messages = [
         {"role": "system" if index == 0 else "user", "content": str(message.content)}
         for index, message in enumerate(formatted)
     ]
+    if history:
+        messages[1:1] = [
+            {"role": item["role"], "content": item["content"]}
+            for item in history if item.get("role") in {"user", "assistant"}
+        ]
+    return messages
