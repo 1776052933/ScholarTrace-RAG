@@ -22,7 +22,7 @@ def _seconds(value: float | None) -> str:
 
 
 def build_report(qasper_dir: Path, multi_path: Path, answers_dir: Path,
-                 ragas_path: Path, review_path: Path) -> str:
+                 ragas_path: Path, review_path: Path, ai_review_path: Path) -> str:
     qmanifest = _read(qasper_dir / "manifest.json")
     qsummary = _read(qasper_dir / "summary.json")
     qrecords = [_read(path) for path in sorted((qasper_dir / "records").glob("*.json"))]
@@ -32,6 +32,11 @@ def build_report(qasper_dir: Path, multi_path: Path, answers_dir: Path,
     cached = _read(answers_dir / "summary.json")
     ragas = _read(ragas_path) if ragas_path.is_file() else None
     review = summarize_sheet(review_path)
+    ai_review = _read(ai_review_path) if ai_review_path.is_file() else None
+    if ai_review is not None:
+        if (ai_review.get("schema_version") != "m6-ai-assisted-review-v1"
+                or len(ai_review.get("records", [])) != 44):
+            raise ValueError("Expected the 44-row AI-assisted preliminary review")
     variants = qsummary["variants"]
     if any(row["question_count"] != 30 for row in variants.values()):
         raise ValueError("QASPER variant denominator differs from 30")
@@ -89,7 +94,7 @@ def build_report(qasper_dir: Path, multi_path: Path, answers_dir: Path,
             failures += 1
     if not failures:
         lines.append("- 本轮跨论文 test 题没有答案片段漏检；仍需增加题量与人工审查。")
-    lines.extend(["", "## Ragas 与人工复核", ""])
+    lines.extend(["", "## Ragas 与回答复核", ""])
     if ragas:
         lines.append("Ragas `StringPresence` 对 M3 缓存答案进行离线片段检查：")
         lines.extend(["", "| 分组 | 答案含全部片段 | 平均片段存在率 |", "| --- | ---: | ---: |"])
@@ -99,23 +104,41 @@ def build_report(qasper_dir: Path, multi_path: Path, answers_dir: Path,
         lines.append("该指标只检查字串出现；不会判断句子真伪或证据是否支持。")
     else:
         lines.append("Ragas 可选依赖尚未跑通，不能将它列为已验收指标。")
+    if ai_review is not None:
+        ai_summary = ai_review["summary"]
+        if (ai_summary["total"] != len(ai_review["records"])
+                or ai_summary["answer_correct"] != sum(
+                    row["answer_correct"] == "yes" for row in ai_review["records"])
+                or ai_summary["citation_supported_strict_excerpt"] != sum(
+                    row["citation_supported_strict_excerpt"] == "yes" for row in ai_review["records"])):
+            raise ValueError("AI review summary differs from its records")
+        lines.extend(["", "AI 辅助初审（逐条对照原 PDF，**不是独立人工复核**）："
+                      f"回答正确 {ai_summary['answer_correct']}/{ai_summary['total']}；"
+                      f"严格按引用摘录判定支持 {ai_summary['citation_supported_strict_excerpt']}/{ai_summary['total']}。"
+                      "这是 M3 单论文缓存回答的初步判断，不能代表 M5/M6 多论文在线回答质量。"
+                      "[逐项结果、六条重点复核记录与口径](M6_AI_ASSISTED_REVIEW.md)。"])
     reviewed = sum(row["answer_reviewed"] for row in review["groups"].values())
     total = sum(row["rows"] for row in review["groups"].values())
+    test_groups = {name: row for name, row in review["groups"].items() if name.startswith("test:")}
+    test_complete = all(row["answer_reviewed"] == row["rows"] and
+                        row["citation_reviewed"] == row["rows"] for row in test_groups.values())
     wall_seconds = (datetime.fromisoformat(qsummary["finished_at_utc"]) -
                     datetime.fromisoformat(qmanifest["started_at_utc"])).total_seconds()
-    lines.extend([f"人工复核表：**{reviewed}/{total}** 条答案已填写正确性判断；"
-                  + ("全部回答与引用已具名复核。" if review["complete"] else "尚未完成，不能报告人工正确率或引用支持率。")])
-    if review["complete"]:
+    lines.extend(["", f"人工复核表：**{reviewed}/{total}** 条答案已填写正确性判断；"
+                  + ("全部回答与引用已具名复核。" if review["complete"] else
+                     "全量审查未完成，不能报告全部 44 条的人工正确率或引用支持率。")])
+    if review["complete"] or test_complete:
         lines.extend(["", "| 分组 | 回答正确/总数 | 引用支持/总数 |", "| --- | ---: | ---: |"])
-        for name, row in review["groups"].items():
+        groups_to_report = review["groups"] if review["complete"] else test_groups
+        for name, row in groups_to_report.items():
             lines.append(f"| {name} | {row['answer_correct']}/{row['rows']} ({_pct(row['answer_correct'] / row['rows'])}) | {row['citation_supported']}/{row['rows']} ({_pct(row['citation_supported'] / row['rows'])}) |")
-        lines.append("\n以上比例只涵盖审查表中的固定 44 条，不代表开放问题上的正确率。")
+        lines.append("\n以上只涵盖表中已完整复核的分组；test 的 20 条记录对应 10 道问题 × 2 种解析路径，不是 20 道独立题，也不代表开放问题上的正确率。")
     lines.extend(["", "## 成本、限制与下一步", "",
                   f"- QASPER 检索本轮完成 {len(qrecords)} 题 × {len(qmanifest['variants'])} 路；运行记录包含逐题耗时和失败状态。M6 额外生成调用 0 次、在线判分调用 0 次。",
                   f"- 这次 CPU 本机 QASPER 运行约 {wall_seconds / 60:.1f} 分钟，其中论文清洗、切块和两种索引写入约 {qsummary['ingest_seconds'] / 60:.1f} 分钟；查询延迟单独见表格，不包括入库。",
                   "- 现有首轮 PDF 标注未独立复核；四道跨论文题不足以代表复杂研究任务；结构化 QASPER 不能验证 PDF 页码。",
                   "- LitSearch 全量 64,183 篇语料尚未跑官方固定集；早期 32 篇烟测没有金标准覆盖，不能报告发现质量。",
-                  "- 完成 44 条回答与 10 篇 PDF 的独立复核后，再扩大多论文 test 集，补无答案/拒答题，并对比真实回答质量与引用支持率。",
+                  "- 若要报告完整 44 条的人工正确率，须逐条独立复核；也可先完整复核 test 的 10 题 × 2 种解析路径，仅报告该 20 条的分组结果。后续扩大多论文 test 集，补无答案/拒答题，并对比真实回答质量与引用支持率。",
                   "", "## 复现入口", "",
                   "- `python -m pytest -q test_m6_evaluation.py`：无密钥评测契约。",
                   "- `python -m evaluation.run_m3_ablation --split test --limit 30 --seed 42 ...`：六路检索；参数见 M6 运行说明。",
@@ -133,10 +156,11 @@ def main() -> None:
     parser.add_argument("--answers-dir", type=Path, default=Path("evaluation/runs/m3_parser_answers_10pdf_20261017"))
     parser.add_argument("--ragas-report", type=Path, default=Path("evaluation/runs/m6_ragas_cached_answers_20261018.json"))
     parser.add_argument("--review-sheet", type=Path, default=Path("evaluation/runs/m6_answer_review_20261018.csv"))
+    parser.add_argument("--ai-review", type=Path, default=Path("evaluation/reviews/m6_ai_review_20261018.json"))
     parser.add_argument("--output", type=Path, default=Path("docs/M6_REPORT.md"))
     args = parser.parse_args()
     report = build_report(args.qasper_dir, args.multi_report, args.answers_dir,
-                          args.ragas_report, args.review_sheet)
+                          args.ragas_report, args.review_sheet, args.ai_review)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(report, encoding="utf-8")
     print(args.output)

@@ -66,9 +66,9 @@ docker run --rm -p 127.0.0.1:18506:8501 -v "${PWD}:/app" -w /app auto_paper-mode
 
 浏览器打开 `http://127.0.0.1:18506`。该页面逐条显示引用及其 PDF 页，并允许查看其他页；每题分别判断回答事实和引用支持，填写复核人、错误类型与必要的备注，点击“保存本题”。默认只显示未完成题，保存后自动切到下一题；取消该筛选可以修改已保存的判断。该页面不调用模型或外部接口；文件和审查结果都留在本机。审查人应以原始 PDF 为准，标注候选和自动风险提示只用于定位，不能直接当作正确性结论。
 
-`python -m evaluation.render_m6_gold_pages --split test` 可将金标准页渲染为本地 PNG，辅助核对表格值和页码。复核范围为全部 44 条，界面优先展示自动标出的 4 条风险记录；其余 40 条也必须分别检查回答与引用。全部结果位于被 `.gitignore` 排除的 `evaluation/runs/`。全部评测完成后，`python -m evaluation.report_m6` 从固定运行记录重建 `docs/M6_REPORT.md`。新留出题的结果与默认策略决定见 [检索优化后续记录](M6_RETRIEVAL_FOLLOWUP.md)。
+`python -m evaluation.render_m6_gold_pages --split test` 可将金标准页渲染为本地 PNG，辅助核对表格值和页码。要报告全部 44 条的人工正确率，必须逐条核对回答与引用；也可先完整复核 test 的 10 道问题 × 2 种解析路径，仅报告这 20 条的分组结果，不能把它说成 20 道独立题或全量结果。页面会优先展示自动风险提示；[AI 初审](M6_AI_ASSISTED_REVIEW.md)另列六条重点核对记录，两者都只是线索。全部结果位于被 `.gitignore` 排除的 `evaluation/runs/`。填写后运行 `python -m evaluation.report_m6`，从固定运行记录重建 `docs/M6_REPORT.md`。新留出题的结果与默认策略决定见 [检索优化后续记录](M6_RETRIEVAL_FOLLOWUP.md)。
 
-另有[44 条回答的 AI 辅助初审](M6_AI_ASSISTED_REVIEW.md)，用于缩小人工排查范围。其逐项判断单独存放，不会写入具名人工复核表；初审比例不能称作人工正确率。
+AI 初审的逐项判断单独存放，不会写入具名人工复核表；初审比例不能称作人工正确率。
 
 ## 本轮验收范围
 
