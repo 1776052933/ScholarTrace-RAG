@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 import anyio
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
+from fastapi.responses import FileResponse
+from hashlib import sha256
+from uuid import uuid4
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import StreamingResponse
 from sqlalchemy import select, text
@@ -18,18 +21,19 @@ from app.api.schemas import (
     IngestionRequest, JobListItem, JobSnapshot, MultiPaperQuestionRequest,
     MultiPaperQuestionResponse, PaperSummary, QuestionRequest, QuestionResponse,
     ResearchOptions, ConversationCreate, ConversationMessageRequest,
-    ConversationSummary, ConversationDetail,
+    ConversationSummary, ConversationDetail, CollectionNameRequest, CollectionPaperRequest,
 )
 from app.config import ModelSettings
 from app.services.jobs import JobBusyError, ResearchJobRunner
 from app.services.ingestions import IngestionConflictError, IngestionJobService
 from app.services.questions import QuestionService, PaperIndexUnavailableError
 from app.services.conversations import ConversationService, ConversationBusyError
+from app.services.library import PaperLibraryService, LibraryConflictError
 from rag_reader.errors import RAGError
 from rag_reader.config import RAGSettings
 from rag_reader.store_factory import milvus_index_scope
 from literature_database.database import DatabaseManager
-from literature_database.models import PaperModel
+from literature_database.models import PaperModel, PaperFileModel
 import app.storage.models  # noqa: F401 - register M2 ORM tables
 
 
@@ -49,6 +53,7 @@ def create_app(
     ingestions = IngestionJobService(database, root, dispatch=ingestion_dispatcher)
     questions = question_service or QuestionService(database, root)
     conversations = ConversationService(database, questions)
+    library = PaperLibraryService(database, root, ingestions)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -68,6 +73,7 @@ def create_app(
     app.state.ingestions = ingestions
     app.state.questions = questions
     app.state.conversations = conversations
+    app.state.library = library
     app.state.data_root = root
 
     @app.get("/api/v1/health")
@@ -138,12 +144,16 @@ def create_app(
         scope = milvus_index_scope(settings) + ":" if settings.vector_backend == "milvus" else None
         with database.get_session() as session:
             rows = session.scalars(select(PaperModel).order_by(PaperModel.rank_score.desc()).limit(limit)).all()
+            files = session.scalars(select(PaperFileModel).where(PaperFileModel.file_type == "pdf")).all()
+            pdf_ids = {item.paper_id for item in files if item.status.casefold() != "mismatch" and Path(item.file_path).is_file()}
             return [PaperSummary(
                 paper_id=row.paper_id,
                 title=row.title,
                 authors=row.authors or [],
                 year=row.year,
                 availability=row.availability,
+                source="uploaded" if row.paper_id.startswith("upload:") else "discovered",
+                has_pdf=row.paper_id in pdf_ids,
                 embedding_status=(
                     "REINDEX_REQUIRED"
                     if scope and row.embedding_status.casefold() == "completed"
@@ -151,6 +161,127 @@ def create_app(
                     else row.embedding_status
                 ),
             ) for row in rows]
+
+    @app.post("/api/v1/papers/upload", status_code=202)
+    async def upload_paper(file: UploadFile = File(...), title: str | None = Form(default=None),
+                           collection_id: str | None = Form(default=None),
+                           paper_id: str | None = Form(default=None)) -> dict[str, Any]:
+        if not file.filename or not file.filename.lower().endswith(".pdf"):
+            raise HTTPException(422, "请选择 PDF 文件。")
+        chosen_title = (title or Path(file.filename).stem).strip()
+        if not 1 <= len(chosen_title) <= 500:
+            raise HTTPException(422, "论文标题长度须为 1–500 个字符。")
+        upload_dir = root / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        temporary = upload_dir / f".{uuid4().hex}.part"
+        digest = sha256()
+        total = 0
+        try:
+            with temporary.open("xb") as output:
+                while chunk := await file.read(1024 * 1024):
+                    total += len(chunk)
+                    if total > 50 * 1024 * 1024:
+                        raise HTTPException(413, "PDF 不能超过 50 MB。")
+                    digest.update(chunk)
+                    output.write(chunk)
+            if total < 8:
+                raise HTTPException(422, "PDF 文件为空或损坏。")
+            with temporary.open("rb") as input_file:
+                if input_file.read(5) != b"%PDF-":
+                    raise HTTPException(422, "文件内容不是 PDF。")
+            import fitz
+            try:
+                with fitz.open(temporary) as document:
+                    if document.is_encrypted or document.page_count < 1:
+                        raise ValueError("encrypted or empty PDF")
+            except Exception as exc:
+                raise HTTPException(422, "PDF 无法读取、已加密或没有页面。") from exc
+            try:
+                paper_id, job_id = library.register_upload(temporary, digest.hexdigest(),
+                                                            chosen_title, collection_id,
+                                                            paper_id.strip() if paper_id else None)
+            except KeyError as exc:
+                raise HTTPException(404, "论文集合不存在。") from exc
+            except LibraryConflictError as exc:
+                raise HTTPException(409, str(exc)) from exc
+            return {"paper_id": paper_id, "ingestion_job_id": job_id,
+                    "status": "queued" if job_id else "already_indexed"}
+        finally:
+            temporary.unlink(missing_ok=True)
+            await file.close()
+
+    @app.get("/api/v1/papers/{paper_id}/pdf")
+    def get_paper_pdf(paper_id: str) -> FileResponse:
+        try:
+            return FileResponse(library.pdf_path(paper_id), media_type="application/pdf",
+                                filename="paper.pdf", content_disposition_type="inline")
+        except KeyError as exc:
+            raise HTTPException(404, "论文不存在。") from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "本地 PDF 不可用。") from exc
+
+    @app.post("/api/v1/papers/{paper_id}/reindex", status_code=202)
+    def reindex_paper(paper_id: str) -> dict[str, str]:
+        try:
+            return {"ingestion_job_id": library.reindex(paper_id)}
+        except KeyError as exc:
+            raise HTTPException(404, "论文不存在。") from exc
+        except LibraryConflictError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.delete("/api/v1/papers/{paper_id}", status_code=204)
+    def delete_paper(paper_id: str) -> Response:
+        try:
+            library.delete_uploaded(paper_id)
+            return Response(status_code=204)
+        except KeyError as exc:
+            raise HTTPException(404, "论文不存在。") from exc
+        except LibraryConflictError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.get("/api/v1/collections")
+    def list_collections() -> list[dict[str, Any]]:
+        return library.collections()
+
+    @app.post("/api/v1/collections", status_code=201)
+    def create_collection(body: CollectionNameRequest) -> dict[str, Any]:
+        return library.create_collection(body.name)
+
+    @app.get("/api/v1/collections/{collection_id}")
+    def get_collection(collection_id: str) -> dict[str, Any]:
+        try:
+            return library.get_collection(collection_id)
+        except KeyError as exc:
+            raise HTTPException(404, "论文集合不存在。") from exc
+
+    @app.patch("/api/v1/collections/{collection_id}")
+    def rename_collection(collection_id: str, body: CollectionNameRequest) -> dict[str, Any]:
+        try:
+            return library.rename_collection(collection_id, body.name)
+        except KeyError as exc:
+            raise HTTPException(404, "论文集合不存在。") from exc
+
+    @app.delete("/api/v1/collections/{collection_id}", status_code=204)
+    def delete_collection(collection_id: str) -> Response:
+        try:
+            library.delete_collection(collection_id)
+            return Response(status_code=204)
+        except KeyError as exc:
+            raise HTTPException(404, "论文集合不存在。") from exc
+
+    @app.post("/api/v1/collections/{collection_id}/papers")
+    def add_collection_paper(collection_id: str, body: CollectionPaperRequest) -> dict[str, Any]:
+        try:
+            return library.add_paper(collection_id, body.paper_id)
+        except KeyError as exc:
+            raise HTTPException(404, "论文集合或论文不存在。") from exc
+
+    @app.delete("/api/v1/collections/{collection_id}/papers/{paper_id}")
+    def remove_collection_paper(collection_id: str, paper_id: str) -> dict[str, Any]:
+        try:
+            return library.remove_paper(collection_id, paper_id)
+        except KeyError as exc:
+            raise HTTPException(404, "论文集合不存在。") from exc
 
     @app.post("/api/v1/questions", response_model=QuestionResponse)
     def ask_question(request: QuestionRequest) -> QuestionResponse:

@@ -27,6 +27,9 @@ from api_client import (
     retry_selected_ingestion,
     start_selected_ingestion,
     start_workflow,
+    upload_pdf, paper_pdf, reindex_paper, delete_uploaded_paper,
+    paper_collections, create_collection, rename_collection, delete_collection,
+    add_collection_paper, remove_collection_paper,
 )
 from reporting import (
     KNOWLEDGE_LABELS,
@@ -1423,15 +1426,156 @@ def render_ingestion_job() -> None:
 def render_library() -> None:
     if not st.session_state.get("api_connected"):
         return
-    with st.expander("论文库 · 多篇证据问答", expanded=False):
+    with st.expander("论文库 · 本地上传、集合与证据问答", expanded=False):
         try:
             papers = paper_library()
+            collections = paper_collections()
         except WorkflowRunError as exc:
             st.warning(str(exc))
             return
+        by_id = {str(item["paper_id"]): item for item in papers}
+        collection_by_id = {str(item["collection_id"]): item for item in collections}
+        st.markdown("#### 上传本地 PDF")
+        with st.form("library_upload_form", clear_on_submit=True):
+            file = st.file_uploader("选择论文 PDF（最大 50 MB）", type=["pdf"])
+            title = st.text_input("论文标题（可选）", help="留空时使用文件名；上传内容按文件哈希去重。")
+            attachable = [paper_id for paper_id, item in by_id.items()
+                          if item.get("source") != "uploaded" and not item.get("has_pdf")]
+            attach_to = st.selectbox("关联已有检索论文（可选）", [""] + attachable,
+                                     format_func=lambda value: by_id[value]["title"] if value else "作为新论文上传")
+            destination = st.selectbox("加入集合（可选）", [""] + list(collection_by_id),
+                                       format_func=lambda value: collection_by_id[value]["name"] if value else "暂不加入集合")
+            if st.form_submit_button("上传并开始入库", type="primary"):
+                if file is None:
+                    st.error("请先选择 PDF 文件。")
+                else:
+                    try:
+                        uploaded = upload_pdf(file.name, file.getvalue(), title or Path(file.name).stem,
+                                              destination or None, attach_to or None)
+                    except WorkflowRunError as exc:
+                        st.error(str(exc))
+                    else:
+                        st.session_state["library_upload_job_id"] = uploaded.get("ingestion_job_id")
+                        st.session_state["library_notice"] = (
+                            "PDF 已保存，正在后台解析和入库。" if uploaded.get("ingestion_job_id")
+                            else "这份 PDF 已存在并完成入库。"
+                        )
+                        st.rerun()
+        if st.session_state.get("library_notice"):
+            st.success(st.session_state.pop("library_notice"))
+        upload_job_id = st.session_state.get("library_upload_job_id")
+        if upload_job_id:
+            try:
+                snapshot = poll_workflow(str(upload_job_id))
+                st.caption(f"最近一次上传：{JOB_STATUS_LABELS.get(snapshot['status'], snapshot['status'])} · "
+                           f"{snapshot.get('progress', 0)}%")
+                for item in (snapshot.get("result") or {}).get("papers") or []:
+                    if item.get("error"):
+                        st.warning(f"{item.get('title')}: {item['error']}")
+                if snapshot.get("retryable") and snapshot["status"] in {"failed", "partial_success", "interrupted"}:
+                    if st.button("重试上传入库", key="retry_upload_ingestion"):
+                        retry_selected_ingestion(str(upload_job_id))
+                        st.rerun()
+                if snapshot["status"] in {"queued", "running"}:
+                    if st.button("刷新入库状态", key="refresh_upload_ingestion"):
+                        st.rerun()
+            except WorkflowRunError as exc:
+                st.warning(str(exc))
+
+        st.markdown("#### 论文集合")
+        with st.form("new_paper_collection", clear_on_submit=True):
+            new_name = st.text_input("新集合名称", max_chars=100)
+            if st.form_submit_button("创建集合"):
+                if not new_name.strip():
+                    st.error("请输入集合名称。")
+                else:
+                    try:
+                        create_collection(new_name)
+                        st.rerun()
+                    except WorkflowRunError as exc:
+                        st.error(str(exc))
+        selected_collection = st.selectbox("当前集合", [""] + list(collection_by_id),
+                                           format_func=lambda value: collection_by_id[value]["name"] if value else "全部论文",
+                                           key="library_collection_filter")
+        if selected_collection:
+            current = collection_by_id[selected_collection]
+            with st.form("rename_paper_collection"):
+                changed_name = st.text_input("修改集合名称", value=current["name"], max_chars=100)
+                if st.form_submit_button("保存名称"):
+                    try:
+                        rename_collection(selected_collection, changed_name)
+                        st.rerun()
+                    except WorkflowRunError as exc:
+                        st.error(str(exc))
+            eligible = [paper_id for paper_id in by_id if paper_id not in current["paper_ids"]]
+            if eligible:
+                new_member = st.selectbox("添加已有论文", eligible,
+                                          format_func=lambda pid: by_id[pid]["title"], key="collection_new_member")
+                if st.button("加入当前集合"):
+                    try:
+                        add_collection_paper(selected_collection, new_member)
+                        st.rerun()
+                    except WorkflowRunError as exc:
+                        st.error(str(exc))
+            members = [pid for pid in current["paper_ids"] if pid in by_id]
+            if members:
+                member = st.selectbox("移出集合", members,
+                                      format_func=lambda pid: by_id[pid]["title"], key="collection_remove_member")
+                if st.button("仅移出集合"):
+                    try:
+                        remove_collection_paper(selected_collection, member)
+                        st.rerun()
+                    except WorkflowRunError as exc:
+                        st.error(str(exc))
+            if st.checkbox("确认删除这个集合（不会删除论文）", key="confirm_delete_collection"):
+                if st.button("删除集合"):
+                    try:
+                        delete_collection(selected_collection)
+                        st.rerun()
+                    except WorkflowRunError as exc:
+                        st.error(str(exc))
+
+        visible = [item for item in papers if not selected_collection or item["paper_id"] in collection_by_id[selected_collection]["paper_ids"]]
+        st.markdown("#### 文档管理")
+        st.caption(f"当前显示 {len(visible)} 篇。集合是论文分组；问答检索仍按论文 ID 在共享索引中进行。")
+        if visible:
+            st.dataframe([{"论文": item["title"], "来源": "本地上传" if item.get("source") == "uploaded" else "检索入库",
+                           "PDF": "可查看" if item.get("has_pdf") else "缺失", "索引": item["embedding_status"]}
+                          for item in visible], hide_index=True, use_container_width=True)
+            chosen = st.selectbox("操作论文", [item["paper_id"] for item in visible],
+                                  format_func=lambda pid: by_id[pid]["title"], key="library_manage_paper")
+            chosen_paper = by_id[chosen]
+            if chosen_paper.get("has_pdf"):
+                if st.button("准备下载原始 PDF", key="prepare_pdf_download"):
+                    try:
+                        st.session_state["library_pdf_bytes"] = paper_pdf(chosen)
+                        st.session_state["library_pdf_id"] = chosen
+                    except WorkflowRunError as exc:
+                        st.error(str(exc))
+                if st.session_state.get("library_pdf_id") == chosen and st.session_state.get("library_pdf_bytes"):
+                    st.download_button("下载原始 PDF", data=st.session_state["library_pdf_bytes"],
+                                       file_name=f"{chosen.replace(':', '_')}.pdf", mime="application/pdf")
+                if st.button("重新解析并建立索引", key="library_reindex"):
+                    try:
+                        result = reindex_paper(chosen)
+                        st.session_state["library_upload_job_id"] = result["ingestion_job_id"]
+                        st.rerun()
+                    except WorkflowRunError as exc:
+                        st.error(str(exc))
+            if chosen_paper.get("source") == "uploaded":
+                if st.checkbox("确认永久删除本地上传的论文及索引", key="confirm_delete_paper"):
+                    if st.button("删除这篇论文", key="library_delete_paper"):
+                        try:
+                            delete_uploaded_paper(chosen)
+                            st.rerun()
+                        except WorkflowRunError as exc:
+                            st.error(str(exc))
+
         ready = {str(item["paper_id"]): item for item in papers
-                 if item.get("embedding_status") == "COMPLETED"}
-        st.caption(f"已入库且可问答：{len(ready)} 篇。请选择 1–5 篇开始连续问答。")
+                 if item.get("embedding_status") == "COMPLETED"
+                 and (not selected_collection or item["paper_id"] in collection_by_id[selected_collection]["paper_ids"])}
+        st.markdown("#### 集合问答" if selected_collection else "#### 多篇证据问答")
+        st.caption(f"当前可问答：{len(ready)} 篇。请选择 1–5 篇开始连续问答。")
         if not ready:
             st.info("论文库暂无可问答论文。")
             return

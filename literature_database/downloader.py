@@ -263,11 +263,11 @@ class PaperDownloadCoordinator:
         for record in self.file_repository.list_by_paper(paper_id):
             if (
                 record.file_type.casefold() == "pdf"
-                and record.status.casefold() in {"available", "completed", "downloaded", "success"}
+                and record.status.casefold() in {"available", "completed", "downloaded", "success", "uploaded"}
                 and Path(record.file_path).is_file()
             ):
                 path = str(Path(record.file_path).resolve())
-                if paper is not None and pdf_matches_title(path, paper.title) is False:
+                if paper is not None and record.status.casefold() != "uploaded" and pdf_matches_title(path, paper.title) is False:
                     record.status = "MISMATCH"
                     paper.embedding_status = "PENDING"
                     self._invalidate_derived_files(paper_id)

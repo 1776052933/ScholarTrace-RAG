@@ -1,0 +1,17 @@
+# Optional isolated acceptance overlay. Never inherit ambient search credentials.
+# Use with: docker compose -f compose.yaml -f deploy/compose.acceptance.yaml ...
+services:
+  api:
+    environment:
+      SERPAPI_API_KEY: ""
+      OPENALEX_API_KEY: ""
+      LANGFUSE_PUBLIC_KEY: ""
+      LANGFUSE_SECRET_KEY: ""
+      LANGFUSE_BASE_URL: ""
+  worker:
+    environment:
+      SERPAPI_API_KEY: ""
+      OPENALEX_API_KEY: ""
+      LANGFUSE_PUBLIC_KEY: ""
+      LANGFUSE_SECRET_KEY: ""
+      LANGFUSE_BASE_URL: ""

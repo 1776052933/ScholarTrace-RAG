@@ -35,7 +35,7 @@ jobs:
           SERPAPI_API_KEY: ''
           OPENALEX_API_KEY: ''
         run: |
-          python -m pytest -q test_langchain_architecture.py test_conversation_streaming.py test_m6_evaluation.py test_m5_workflow.py test_m4_async.py test_m3_retrieval.py test_m3_api.py test_m2_api.py test_m1_rag.py test_m1_service.py Auto_Paper_UI/test_m4_ui.py Auto_Paper_UI/test_ui_app.py
+          python -m pytest -q test_paper_library_api.py test_langchain_architecture.py test_conversation_streaming.py test_m6_evaluation.py test_m6_review_chinese.py test_m5_workflow.py test_m4_async.py test_m3_retrieval.py test_m3_api.py test_m2_api.py test_m1_rag.py test_m1_service.py Auto_Paper_UI/test_m4_ui.py Auto_Paper_UI/test_ui_app.py
       - name: Validate all Compose services
         run: docker compose --env-file .env.example config --quiet
 

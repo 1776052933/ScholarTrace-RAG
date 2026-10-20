@@ -131,6 +131,8 @@ class PaperManager:
 
     def _find_existing(self, paper: PaperMetadata) -> Optional[PaperModel]:
         existing = self.paper_repository.get_paper_by_id(paper.paper_id)
+        if paper.paper_id.startswith("upload:"):
+            return existing
         if existing is None and paper.doi:
             existing = self.paper_repository.find_by_doi(paper.doi)
         if existing is None:
@@ -152,7 +154,7 @@ class PaperManager:
             PaperFileModel.file_type == "pdf",
         )
         return any(
-            item.status.casefold() in {"available", "completed", "downloaded", "success"}
+            item.status.casefold() in {"available", "completed", "downloaded", "success", "uploaded"}
             and Path(item.file_path).is_file()
             for item in self.session.scalars(statement)
         )

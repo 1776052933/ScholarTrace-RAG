@@ -1,3 +1,11 @@
+x-application: &application
+  image: ${SCHOLARTRACE_IMAGE:-scholartrace:local}
+  build:
+    context: .
+    dockerfile: deploy/Dockerfile
+    args:
+      SOURCE_REVISION: ${SOURCE_REVISION:-unknown}
+
 services:
   mysql:
     image: mysql:8.4
@@ -61,7 +69,7 @@ services:
     volumes:
       - milvus_data:/var/lib/milvus
     ports:
-      - "127.0.0.1:19530:19530"
+      - "127.0.0.1:${SCHOLARTRACE_MILVUS_PORT:-19530}:19530"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
       interval: 30s
@@ -84,10 +92,8 @@ services:
       timeout: 3s
       retries: 10
   api:
-    build:
-      context: .
-      dockerfile: deploy/Dockerfile
-    environment:
+    <<: *application
+    environment: &runtime_environment
       DATABASE_URL: mysql+pymysql://${MYSQL_USER:-scholartrace}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-scholartrace}?charset=utf8mb4
       AUTO_PAPER_DATA_ROOT: /app/data/m2
       RAG_VECTOR_BACKEND: milvus
@@ -96,12 +102,22 @@ services:
       RAG_RETRIEVAL_MODE: ${RAG_RETRIEVAL_MODE:-dense}
       RAG_CANDIDATE_K: ${RAG_CANDIDATE_K:-20}
       RAG_RERANKER_ENABLED: ${RAG_RERANKER_ENABLED:-false}
-      RAG_PDF_PARSER_BACKEND: ${RAG_PDF_PARSER_BACKEND:-pymupdf}
+      RAG_PDF_PARSER_BACKEND: ${RAG_PDF_PARSER_BACKEND:-docling}
       RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-BAAI/bge-m3}
+      RAG_EMBEDDING_DEVICE: cpu
+      RAG_EMBEDDING_BATCH_SIZE: ${RAG_EMBEDDING_BATCH_SIZE:-8}
+      RAG_RERANKER_MODEL: ${RAG_RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}
+      HF_HOME: /app/model-cache
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}
+      TRANSFORMERS_OFFLINE: ${HF_HUB_OFFLINE:-0}
+      OMP_NUM_THREADS: ${MODEL_CPU_THREADS:-4}
+      TOKENIZERS_PARALLELISM: "false"
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
       OPENALEX_API_KEY: ${OPENALEX_API_KEY:-}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_TIMEOUT: ${DEEPSEEK_TIMEOUT:-90}
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-}
@@ -113,8 +129,10 @@ services:
       CHAT_MAX_OUTPUT_TOKENS: ${CHAT_MAX_OUTPUT_TOKENS:-2048}
       CHAT_LEASE_SECONDS: ${CHAT_LEASE_SECONDS:-900}
       CELERY_BROKER_URL: redis://redis:6379/0
-    volumes:
-      - ./data/m2:/app/data/m2
+    volumes: &runtime_volumes
+      - ${SCHOLARTRACE_DATA_DIR:-./data/m2}:/app/data/m2
+      - ${SCHOLARTRACE_MODEL_CACHE:-./data/model-cache}:/app/model-cache
+      - ${SCHOLARTRACE_MODELS_DIR:-./data/models}:/app/models:ro
     ports:
       - "127.0.0.1:${SCHOLARTRACE_API_PORT:-8000}:8000"
     depends_on:
@@ -132,9 +150,7 @@ services:
       retries: 5
     command: ["sh", "-c", "python -m alembic -c alembic.ini upgrade head && python -m uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --workers 1"]
   mcp:
-    build:
-      context: .
-      dockerfile: deploy/Dockerfile
+    <<: *application
     environment:
       SCHOLARTRACE_API_URL: http://api:8000
     ports:
@@ -144,28 +160,11 @@ services:
         condition: service_healthy
     command: ["python", "-m", "app.mcp.server", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8001"]
   worker:
-    build:
-      context: .
-      dockerfile: deploy/Dockerfile
+    <<: *application
     environment:
-      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-scholartrace}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-scholartrace}?charset=utf8mb4
-      AUTO_PAPER_DATA_ROOT: /app/data/m2
-      CELERY_BROKER_URL: redis://redis:6379/0
-      RAG_VECTOR_BACKEND: milvus
-      RAG_COLLECTION_NAME: ${RAG_COLLECTION_NAME:-paper_chunks_m3}
-      MILVUS_URI: http://milvus:19530
-      RAG_RETRIEVAL_MODE: ${RAG_RETRIEVAL_MODE:-dense}
-      RAG_CANDIDATE_K: ${RAG_CANDIDATE_K:-20}
-      RAG_RERANKER_ENABLED: ${RAG_RERANKER_ENABLED:-false}
-      RAG_PDF_PARSER_BACKEND: ${RAG_PDF_PARSER_BACKEND:-pymupdf}
-      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-BAAI/bge-m3}
-      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
-      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
-      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-}
-      SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
-      OPENALEX_API_KEY: ${OPENALEX_API_KEY:-}
-    volumes:
-      - ./data/m2:/app/data/m2
+      <<: *runtime_environment
+      DEEPSEEK_API_KEY: ""
+    volumes: *runtime_volumes
     depends_on:
       api:
         condition: service_healthy
@@ -173,9 +172,7 @@ services:
         condition: service_healthy
     command: ["python", "-m", "celery", "-A", "app.tasks:celery_app", "worker", "--loglevel=INFO", "--concurrency=1"]
   beat:
-    build:
-      context: .
-      dockerfile: deploy/Dockerfile
+    <<: *application
     environment:
       DATABASE_URL: mysql+pymysql://${MYSQL_USER:-scholartrace}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-scholartrace}?charset=utf8mb4
       AUTO_PAPER_DATA_ROOT: /app/data/m2
@@ -187,9 +184,7 @@ services:
         condition: service_healthy
     command: ["python", "-m", "celery", "-A", "app.tasks:celery_app", "beat", "--loglevel=INFO", "--schedule=/tmp/scholartrace-celerybeat"]
   ui:
-    build:
-      context: .
-      dockerfile: deploy/Dockerfile
+    <<: *application
     environment:
       AUTO_PAPER_API_URL: http://api:8000
     ports:

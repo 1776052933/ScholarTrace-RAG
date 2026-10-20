@@ -133,6 +133,18 @@ class PaperSummary(BaseModel):
     year: int | None
     availability: str
     embedding_status: str
+    source: str = "discovered"
+    has_pdf: bool = False
+
+
+class CollectionNameRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    name: str = Field(min_length=1, max_length=100)
+
+
+class CollectionPaperRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    paper_id: str = Field(min_length=1, max_length=255)
 
 
 class ConversationCreate(BaseModel):

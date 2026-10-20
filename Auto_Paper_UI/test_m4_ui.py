@@ -21,6 +21,7 @@ def _offline_api(monkeypatch, *, connected: bool = True):
     })
     monkeypatch.setattr(api_client, "recent_workflows", lambda _limit: [])
     monkeypatch.setattr(api_client, "paper_library", lambda: [])
+    monkeypatch.setattr(api_client, "paper_collections", lambda: [])
     return api_client
 
 

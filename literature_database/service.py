@@ -398,7 +398,7 @@ def _first_existing_path(
     for item in files:
         if (
             item.file_type.casefold() in accepted_types
-            and item.status.casefold() in {"available", "completed", "downloaded", "parsed", "success"}
+            and item.status.casefold() in {"available", "completed", "downloaded", "parsed", "success", "uploaded"}
             and Path(item.file_path).is_file()
         ):
             return item.file_path

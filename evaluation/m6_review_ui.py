@@ -13,6 +13,7 @@ import streamlit as st
 
 from evaluation.m6_review import ERROR_TYPES, FIELDS, summarize_sheet
 from evaluation.m6_review_priorities import prioritize
+from evaluation.m6_review_translations import load_translations, translate, reference_translation
 
 
 SHEET = Path("evaluation/runs/m6_answer_review_20261018.csv")
@@ -70,26 +71,62 @@ def _save(rows: list[dict[str, str]]) -> None:
         writer = csv.DictWriter(stream, FIELDS)
         writer.writeheader()
         writer.writerows(rows)
+    summarize_sheet(temporary)
     temporary.replace(SHEET)
-    summarize_sheet(SHEET)
+
+
+def _bilingual(label: str, original: str, catalog: dict, key: str) -> None:
+    st.markdown(f"**{label}**")
+    chinese = translate(original, catalog)
+    if chinese is None:
+        st.warning("这段内容尚无匹配的中文译文，请查看原文；不要据此猜测评分。")
+        st.text(original)
+    else:
+        st.markdown(chinese)
+    with st.expander(f"{label} · 查看原文"):
+        st.text_area("原始内容", original, height=180, disabled=True, key=key)
 
 
 def main() -> None:
-    st.set_page_config(page_title="M6 答案复核", layout="wide")
-    st.title("M6 论文问答复核")
-    st.caption("逐题核对原始 PDF、回答和引用；本页不发送论文或答案到外部服务。")
+    st.set_page_config(page_title="M6 中文辅助复核", layout="wide")
+    st.title("M6 论文问答复核 · 中文辅助")
+    st.caption("中文译文已保存在本机，打开页面无需调用模型，也不会向外部服务发送内容。")
+    st.info("先读中文问题和回答，再对照引用及右侧 PDF 判断。译文由 AI 辅助生成，不是标准答案；"
+            "可能有翻译误差，尤其是原文串栏或表格错位时。无法确认就保留“待复核”，不要猜测。")
     if not SHEET.is_file():
         st.error("未找到复核表。先运行 python -m evaluation.m6_review 生成本地 CSV。")
         st.stop()
     rows = _rows()
+    catalog = load_translations()
+    unique_questions = len({(row["document_id"], row["question_id"]) for row in rows})
+    st.caption(f"共 {unique_questions} 道问题、{len(rows)} 条回答（两种 PDF 解析方案）。"
+               "本次属于机器翻译辅助的人工复核；问题、模型回答及已有评分保持原样。")
     summarize_sheet(SHEET)
     reviewed = sum(bool(row["answer_correct"] and row["citations_supported"]) for row in rows)
-    st.progress(reviewed / len(rows), text=f"回答和引用均已复核 {reviewed}/{len(rows)}")
+    st.progress(reviewed / len(rows), text=f"累计已完成 {reviewed}/{len(rows)} 条回答复核（包含之前保存的记录）")
+    st.caption("这是原来的同一批记录，中文版只增加翻译。编号是固定记录编号，不是本次作答顺序；"
+               "旧界面默认优先显示需重点核对的记录，现在默认按编号显示，因此首条可能不同。"
+               "同一道问题的两种解析方案各算一条复核记录。")
+    with st.expander(f"查看已保存的判断，找回需要修改的记录（累计完成 {reviewed} 条）"):
+        st.caption("要修改下面的记录，请取消勾选“只显示未完成的题目”，再按固定编号选择。"
+                   "修改已完成记录不会增加累计完成数。")
+        saved = [
+            {"固定编号": f"{i + 1:02d}", "问题": translate(row["question"], catalog) or row["question"],
+             "解析方案": row["variant"],
+             "回答判断": {"": "待复核", "yes": "正确", "no": "错误"}[row["answer_correct"]],
+             "引用判断": {"": "待复核", "yes": "支持", "no": "不支持"}[row["citations_supported"]]}
+            for i, row in enumerate(rows) if row["answer_correct"] or row["citations_supported"]
+        ]
+        if saved:
+            st.dataframe(saved, hide_index=True, width="stretch")
+        else:
+            st.write("尚无已保存的判断。")
     priorities = prioritize(ANSWERS_DIR)
     risks = {(item["split"], item["document_id"], item["question_id"], item["variant"]): item["reasons"]
              for item in priorities}
     pending_only = st.checkbox("只显示未完成的题目", value=True)
-    risk_first = st.checkbox("优先显示需重点核对的题目", value=True)
+    show_hints = st.checkbox("显示自动排查提示（可能影响独立判断，默认关闭）", value=False)
+    risk_first = st.checkbox("优先显示需重点核对的题目", value=False) if show_hints else False
     indexes = [i for i, row in enumerate(rows)
                if not pending_only or not row["answer_correct"] or not row["citations_supported"]]
     if risk_first:
@@ -99,15 +136,18 @@ def main() -> None:
         st.success("所有行都有判断。请导出并检查汇总结果。")
         st.stop()
     selected = st.selectbox(
-        "选择题目", indexes,
-        format_func=lambda i: f"{i + 1:02d} · {rows[i]['split']} · {rows[i]['document_id']} · {rows[i]['variant']} · {rows[i]['question'][:65]}",
+        "选择题目（固定记录编号）", indexes,
+        format_func=lambda i: f"记录 {i + 1:02d} · "
+                              f"{'已完成' if rows[i]['answer_correct'] and rows[i]['citations_supported'] else '待完成'} · "
+                              f"{rows[i]['variant']} · "
+                              f"{translate(rows[i]['question'], catalog) or rows[i]['question']}",
     )
     row = rows[selected]
     key = (row["split"], row["document_id"], row["question_id"], row["variant"])
     flags = risks.get(key, [])
     source = _answer_records()[key]
     citations = source.get("citations") or []
-    if flags:
+    if show_hints and flags:
         st.warning("自动排查提示：" + "、".join(RISK_LABELS.get(flag, flag) for flag in flags)
                    + "。这些是核对线索，不是错误判定。")
     pdfs = {item["id"]: Path(item["pdf"])
@@ -116,18 +156,22 @@ def main() -> None:
     left, right = st.columns([1, 1])
     with left:
         st.subheader("题目与回答")
-        st.write(row["question"])
-        st.text_area("回答原文", row["answer"], height=180, disabled=True)
-        st.caption(f"待核对的标注候选：{row['answer_fragments']}；页码：{row['gold_page']}。请以原始 PDF 为准。")
+        st.caption(f"论文：{row['document_id']} · 解析方案：{row['variant']} · "
+                   f"{'开发集' if row['split'] == 'dev' else '测试集'}")
+        _bilingual("问题（中文）", row["question"], catalog, f"question_original_{selected}")
+        _bilingual("模型回答（中文，待你判断对错）", row["answer"], catalog, f"answer_original_{selected}")
+        st.caption(f"标注候选（定位线索）：{reference_translation(row['answer_fragments'], catalog)}；"
+                   f"PDF 第 {row['gold_page']} 页。请以原始 PDF 为准。")
+        with st.expander("标注候选原文"):
+            st.text(row["answer_fragments"])
         st.subheader("引用")
         pages = [int(cite["page"]) for cite in citations]
         st.write("引用页：" + (", ".join(map(str, pages)) if pages else "无"))
         if not citations:
             st.info("该回答没有引用片段。")
         for index, cite in enumerate(citations, start=1):
-            st.text_area(f"引用 {index} · PDF 第 {cite['page']} 页",
-                         str(cite.get("excerpt") or ""), height=160, disabled=True,
-                         key=f"citation_{selected}_{index}")
+            _bilingual(f"引用 {index}（中文）· PDF 第 {cite['page']} 页",
+                       str(cite.get("excerpt") or ""), catalog, f"citation_{selected}_{index}")
         with st.expander("判定口径"):
             st.markdown("回答应完整、准确地回答问题，以原始 PDF 为准；标注候选仅作定位线索。"
                         "引用需要在所标页提供足以支持回答的原文，仅页码相同不算支持。"
@@ -137,11 +181,11 @@ def main() -> None:
             choices = ["unreviewed", "yes", "no"]
             answer = st.radio("回答事实是否正确？", choices,
                               index=choices.index(row["answer_correct"] or "unreviewed"),
-                              format_func={"unreviewed": "待核", "yes": "正确", "no": "错误"}.get,
+                              format_func={"unreviewed": "无法判断 / 待复核", "yes": "正确", "no": "错误"}.get,
                               horizontal=True)
             citation = st.radio("所引原文是否支持回答？", choices,
                                 index=choices.index(row["citations_supported"] or "unreviewed"),
-                                format_func={"unreviewed": "待核", "yes": "支持", "no": "不支持"}.get,
+                                format_func={"unreviewed": "无法判断 / 待复核", "yes": "支持", "no": "不支持"}.get,
                                 horizontal=True)
             errors = sorted(ERROR_TYPES)
             error_type = st.selectbox("错误类型", errors,
@@ -162,6 +206,8 @@ def main() -> None:
                 st.rerun()
     with right:
         st.subheader("原始 PDF")
+        st.caption("PDF 保留原版英文；左侧提供引用片段中文对照。表格请同时核对行名、列名、数字及页码。"
+                   "仅凭译文无法确认时，请留待进一步核对。")
         if not pdf.is_file():
             st.warning(f"本机缺少 PDF：{pdf}")
         else:

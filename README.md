@@ -8,6 +8,8 @@ M2 已接入 FastAPI、MySQL/Alembic 和 Streamlit HTTP 客户端；M3 已完成
 
 现已增加[连续对话与流式回答](docs/CONVERSATIONS_AND_STREAMING.md)：MySQL 保存会话和轮次，追问结合近期历史改写后重新检索原文，FastAPI 通过 SSE 实时传递回答正文，Streamlit 支持历史恢复与引用导出。上下文设有字符预算；断流或生成失败的轮次不进入有效历史。
 
+论文库现支持[本地 PDF 上传、论文集合与文档管理](docs/LOCAL_PDF_LIBRARY.md)：上传后复用 Celery 入库任务；集合可筛选多论文连续问答，原始 PDF 可下载，失败任务可重试，已有 PDF 可重建索引。[本轮验收记录](docs/LOCAL_PDF_LIBRARY_ACCEPTANCE_20261020.md)包含完整回归与真实入库结果。
+
 ## 主要模块
 
 | 目录 | 职责 |
@@ -26,12 +28,15 @@ M2 已接入 FastAPI、MySQL/Alembic 和 Streamlit HTTP 客户端；M3 已完成
 
 ## 运行
 
+建议先看[可复现部署与真实模型回归](docs/REPRODUCIBLE_DEPLOYMENT.md)及[本机真实模型验收结果](docs/REAL_MODEL_DEPLOYMENT_ACCEPTANCE_20261020.md)。
+
 Compose 配置包含 MySQL、Milvus、Redis、API、MCP、Celery worker/beat 和 UI。启动前参阅[M5 运行与验收](docs/M5_RUN_AND_ACCEPTANCE.md)：
 
 ```powershell
-Copy-Item .env.example .env
-# 在 .env 中填写本地数据库密码；实时检索/生成需要对应 API Key
-docker compose up --build -d
+python -m scripts.init_deployment_env
+# 在 .env 中填写模型密钥，并配置模型缓存或允许首次下载
+docker compose --env-file .env build api
+docker compose --env-file .env up -d --no-build --wait
 ```
 
 界面位于 `http://127.0.0.1:8501`，API 文档位于 `http://127.0.0.1:8000/docs`，MCP 位于 `http://127.0.0.1:8001/mcp`；端口被占用时可在 `.env` 中设置 `SCHOLARTRACE_UI_PORT`、`SCHOLARTRACE_API_PORT` 和 `SCHOLARTRACE_MCP_PORT`。模型和检索密钥由 API 服务端读取；不要提交 `.env` 或本地密钥。首次摄取论文需要下载 BGE-M3 模型，亦可按 M4 验收说明挂载已下载的模型。无 API Key 仍可运行离线测试和已有论文入库；实时搜索及生成回答需要相应密钥。

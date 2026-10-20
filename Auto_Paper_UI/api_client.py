@@ -46,6 +46,8 @@ def _request(method: str, path: str, *, payload: dict[str, Any] | None = None, t
         with httpx.Client(base_url=_base_url(), timeout=timeout) as client:
             response = client.request(method, path, json=payload)
             response.raise_for_status()
+            if response.status_code == 204:
+                return None
             return response.json()
     except httpx.HTTPStatusError as exc:
         try:
@@ -104,6 +106,67 @@ def retry_selected_ingestion(job_id: str) -> dict[str, Any]:
 
 def paper_library(limit: int = 200) -> list[dict[str, Any]]:
     return list(_request("GET", f"/api/v1/papers?limit={limit}"))
+
+
+def upload_pdf(filename: str, data: bytes, title: str, collection_id: str | None = None,
+               paper_id: str | None = None) -> dict[str, Any]:
+    try:
+        with httpx.Client(base_url=_base_url(), timeout=httpx.Timeout(120.0, connect=10.0)) as client:
+            response = client.post("/api/v1/papers/upload", files={"file": (filename, data, "application/pdf")},
+                                   data={"title": title, "collection_id": collection_id or "",
+                                         "paper_id": paper_id or ""})
+            response.raise_for_status()
+            return dict(response.json())
+    except httpx.HTTPStatusError as exc:
+        try:
+            detail = exc.response.json().get("detail")
+        except (ValueError, AttributeError):
+            detail = None
+        raise WorkflowRunError(str(detail or f"上传失败：HTTP {exc.response.status_code}")) from exc
+    except (httpx.RequestError, ValueError) as exc:
+        raise WorkflowRunError(f"上传失败：{exc}") from exc
+
+
+def paper_pdf(paper_id: str) -> bytes:
+    try:
+        with httpx.Client(base_url=_base_url(), timeout=30.0) as client:
+            response = client.get(f"/api/v1/papers/{paper_id}/pdf")
+            response.raise_for_status()
+            return response.content
+    except httpx.HTTPError as exc:
+        raise WorkflowRunError(f"无法获取 PDF：{exc}") from exc
+
+
+def reindex_paper(paper_id: str) -> dict[str, Any]:
+    return dict(_request("POST", f"/api/v1/papers/{paper_id}/reindex"))
+
+
+def delete_uploaded_paper(paper_id: str) -> None:
+    _request("DELETE", f"/api/v1/papers/{paper_id}")
+
+
+def paper_collections() -> list[dict[str, Any]]:
+    return list(_request("GET", "/api/v1/collections"))
+
+
+def create_collection(name: str) -> dict[str, Any]:
+    return dict(_request("POST", "/api/v1/collections", payload={"name": name}))
+
+
+def rename_collection(collection_id: str, name: str) -> dict[str, Any]:
+    return dict(_request("PATCH", f"/api/v1/collections/{collection_id}", payload={"name": name}))
+
+
+def delete_collection(collection_id: str) -> None:
+    _request("DELETE", f"/api/v1/collections/{collection_id}")
+
+
+def add_collection_paper(collection_id: str, paper_id: str) -> dict[str, Any]:
+    return dict(_request("POST", f"/api/v1/collections/{collection_id}/papers", payload={"paper_id": paper_id}))
+
+
+def remove_collection_paper(collection_id: str, paper_id: str) -> dict[str, Any]:
+    return dict(_request("DELETE", f"/api/v1/collections/{collection_id}/papers/{paper_id}"))
 
 
 def ask_multiple_papers(paper_ids: list[str], question: str) -> dict[str, Any]:

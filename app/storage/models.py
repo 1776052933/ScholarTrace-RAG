@@ -89,3 +89,26 @@ class ConversationTurnModel(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     __table_args__ = (UniqueConstraint("conversation_id", "turn_number", name="uq_conversation_turn_number"),)
+
+
+class PaperCollectionModel(Base):
+    __tablename__ = "paper_collections"
+
+    collection_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now, onupdate=utc_now)
+
+
+class PaperCollectionItemModel(Base):
+    __tablename__ = "paper_collection_items"
+
+    collection_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("paper_collections.collection_id", ondelete="CASCADE"), primary_key=True,
+    )
+    paper_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("papers.paper_id", ondelete="CASCADE"), primary_key=True,
+    )
+    added_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now)
+
+    __table_args__ = (Index("ix_paper_collection_items_paper_id", "paper_id"),)

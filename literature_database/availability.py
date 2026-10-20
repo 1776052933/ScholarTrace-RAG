@@ -61,7 +61,7 @@ class AvailabilityChecker:
 
 _PDF_TYPES = {"pdf", "fulltext", "full_text"}
 _TEXT_TYPES = {"text", "txt", "parsed_text"}
-_AVAILABLE_FILE_STATUSES = {"available", "completed", "downloaded", "success"}
+_AVAILABLE_FILE_STATUSES = {"available", "completed", "downloaded", "success", "uploaded"}
 _PARSED_TEXT_STATUSES = {"available", "completed", "parsed", "success"}
 _EMBEDDING_READY_STATUSES = {"available", "completed", "generated", "ready", "success"}
 
