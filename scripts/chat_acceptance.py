@@ -18,8 +18,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 def main():
     # Override before application imports so neither model calls nor traces leave this process.
     os.environ["DEEPSEEK_API_KEY"] = "loopback-acceptance-fixture"
-    for name in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"):
-        os.environ.pop(name, None)
+    os.environ["LANGSMITH_TRACING"] = "false"
+    os.environ.pop("LANGSMITH_API_KEY", None)
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
     calls = []

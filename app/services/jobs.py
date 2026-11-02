@@ -15,7 +15,7 @@ from sqlalchemy import select, update
 from app.api.schemas import JobListItem, JobSnapshot, ResearchOptions
 from app.storage.models import ResearchJobModel, utc_now
 from observability.tracing import flush_traces, trace_span
-from literature_database.database import DatabaseManager
+from app.papers.database import DatabaseManager
 
 
 _STAGE_PROGRESS = {

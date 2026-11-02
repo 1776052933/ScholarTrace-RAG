@@ -8,7 +8,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from literature_database.models import Base, PaperFileModel, PaperModel
+from app.papers.models import Base, PaperFileModel, PaperModel
 from scripts.migrate_sqlite_to_mysql import backup_sqlite, import_tables
 
 

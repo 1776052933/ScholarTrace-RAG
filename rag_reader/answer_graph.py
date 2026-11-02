@@ -183,6 +183,7 @@ class AnswerGraph:
         }}
         stream = self.graph.stream(self._input(paper_ids, question, streaming=True, **kwargs),
                                    config=config, stream_mode=["custom", "updates"])
+        final_answer = None
         try:
             for mode, data in stream:
                 if mode == "custom":
@@ -190,7 +191,11 @@ class AnswerGraph:
                 else:
                     for update in data.values():
                         if update and "answer" in update:
-                            yield {"event": "answer", "data": update["answer"]}
+                            final_answer = update["answer"]
+            # Let LangGraph finish and close its tracing span before the caller
+            # returns on the final answer event.
+            if final_answer is not None:
+                yield {"event": "answer", "data": final_answer}
         finally:
             # Signal the node before closing the graph, which waits for its worker.
             cancel.set()

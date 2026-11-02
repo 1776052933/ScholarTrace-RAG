@@ -6,7 +6,7 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 
 from app.api.main import create_app
-from literature_database.models import PaperModel
+from app.papers.models import PaperModel
 
 
 def test_api_requires_reindex_for_legacy_completed_paper(tmp_path: Path, monkeypatch):
@@ -35,9 +35,9 @@ def test_api_requires_reindex_for_legacy_completed_paper(tmp_path: Path, monkeyp
 
 
 def test_milvus_ingest_failure_clears_old_ready_signature(tmp_path: Path):
-    from literature_database.database import DatabaseManager
-    from literature_database.schema import PaperMetadata, PaperResource
-    from literature_database.service import LiteratureService
+    from app.papers.database import DatabaseManager
+    from app.papers.schema import PaperMetadata, PaperResource
+    from app.papers.service import LiteratureService
     url = f"sqlite:///{(tmp_path / 'fail.sqlite3').as_posix()}"
     database = DatabaseManager(url)
     database.create_tables()

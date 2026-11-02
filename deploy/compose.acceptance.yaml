@@ -5,13 +5,11 @@ services:
     environment:
       SERPAPI_API_KEY: ""
       OPENALEX_API_KEY: ""
-      LANGFUSE_PUBLIC_KEY: ""
-      LANGFUSE_SECRET_KEY: ""
-      LANGFUSE_BASE_URL: ""
+      LANGSMITH_TRACING: "false"
+      LANGSMITH_API_KEY: ""
   worker:
     environment:
       SERPAPI_API_KEY: ""
       OPENALEX_API_KEY: ""
-      LANGFUSE_PUBLIC_KEY: ""
-      LANGFUSE_SECRET_KEY: ""
-      LANGFUSE_BASE_URL: ""
+      LANGSMITH_TRACING: "false"
+      LANGSMITH_API_KEY: ""

@@ -11,8 +11,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from app.storage.models import ResearchJobModel
-from literature_database.database import DatabaseManager
-from literature_database.models import PaperFileModel, PaperModel
+from app.papers.database import DatabaseManager
+from app.papers.models import PaperFileModel, PaperModel
 
 
 def main() -> None:

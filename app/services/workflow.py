@@ -30,22 +30,22 @@ import sys
 from time import perf_counter
 from typing import Any, Dict, Optional
 
-from literature_database.database import DatabaseManager
+from app.papers.database import DatabaseManager
 from app.config import ModelSettings
 from app.workflows.contracts import (
     _elapsed, _json_value, _merge_upstream_subqueries, _model_data, _normalized_query,
     _optional_iso_date, _replace_papers, _required_text, _stage, _subquery_type,
     _timed, _understanding_for_decomposition, _value,
 )
-from literature_database.service import LiteratureService
-from query_decomposition.pipeline import QueryDecompositionPipeline
-from query_understanding.pipeline import QueryUnderstandingPipeline
+from app.papers.service import LiteratureService
+from app.research.decomposition.pipeline import QueryDecompositionPipeline
+from app.research.understanding.pipeline import QueryUnderstandingPipeline
 from rag_reader.errors import error_info
 from rag_reader.pipeline import RAGReader
 from rag_reader.store_factory import create_vector_store
-from ranking_agent.pipeline import RankingAgent
-from search_agent.citation_tracker import CitationTracker
-from search_agent.pipeline import SearchAgent
+from app.research.ranking.pipeline import RankingAgent
+from app.research.search.citation_tracker import CitationTracker
+from app.research.search.pipeline import SearchAgent
 
 
 logger = logging.getLogger("auto_paper")
@@ -93,25 +93,25 @@ class AutoPaperWorkflow:
         if model_settings is not None and model_settings.api_key.get_secret_value():
             provider = model_settings.client_kwargs()
             if query_understanding is None and use_query_llm:
-                from query_understanding.llm_client import DeepSeekClient as UnderstandingClient
+                from app.research.understanding.llm_client import DeepSeekClient as UnderstandingClient
                 query_understanding = QueryUnderstandingPipeline(
                     llm_client=UnderstandingClient(**provider, timeout_seconds=model_settings.timeout_seconds),
                     use_llm=True,
                     fallback_to_rules=True,
                 )
             if query_decomposition is None and use_query_llm:
-                from query_decomposition.llm_client import DeepSeekClient as DecompositionClient
+                from app.research.decomposition.llm_client import DeepSeekClient as DecompositionClient
                 query_decomposition = QueryDecompositionPipeline(
                     llm_client=DecompositionClient(**provider, timeout_seconds=model_settings.timeout_seconds),
                     use_llm=True,
                     fallback_to_rules=True,
                 )
             if search_agent is None:
-                from search_agent.config import SearchAgentConfig
-                from search_agent.evaluator import SearchEvaluator
-                from search_agent.llm_client import DeepSeekClient as SearchClient
-                from search_agent.planner import SearchPlanner
-                from search_agent.reflector import SearchReflector
+                from app.research.search.config import SearchAgentConfig
+                from app.research.search.evaluator import SearchEvaluator
+                from app.research.search.llm_client import DeepSeekClient as SearchClient
+                from app.research.search.planner import SearchPlanner
+                from app.research.search.reflector import SearchReflector
                 search_config = SearchAgentConfig.from_env()
                 search_client = SearchClient(**provider, timeout_seconds=model_settings.timeout_seconds)
                 search_agent = SearchAgent(
@@ -122,9 +122,9 @@ class AutoPaperWorkflow:
                     reflector=SearchReflector(llm_client=search_client, use_llm=search_config.use_llm),
                 )
             if ranking_agent is None:
-                from ranking_agent.cache import EvaluationCache
-                from ranking_agent.evaluator import PaperEvaluator
-                from ranking_agent.llm_client import DeepSeekClient as RankingClient
+                from app.research.ranking.cache import EvaluationCache
+                from app.research.ranking.evaluator import PaperEvaluator
+                from app.research.ranking.llm_client import DeepSeekClient as RankingClient
                 ranking_agent = RankingAgent(evaluator=PaperEvaluator(
                     llm_client=RankingClient(**provider, timeout=model_settings.timeout_seconds),
                     cache=EvaluationCache(),

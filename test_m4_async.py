@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.api.main import create_app
 from app.storage.models import ResearchJobModel, utc_now
-from literature_database.models import PaperModel
+from app.papers.models import PaperModel
 from rag_reader.qa import PaperQA
 from rag_reader.schema import DocumentChunk, RAGAnswer
 
@@ -227,7 +227,7 @@ def test_multi_paper_qa_adds_evidence_for_paper_missing_from_global_top_k():
 
 def test_multi_paper_answer_is_persisted_with_export(tmp_path, monkeypatch):
     from app.services import questions as module
-    from literature_database.database import DatabaseManager
+    from app.papers.database import DatabaseManager
 
     monkeypatch.setenv("RAG_VECTOR_BACKEND", "chroma")
     url = migrated_database(tmp_path)

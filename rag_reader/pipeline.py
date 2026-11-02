@@ -5,7 +5,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, List, Optional, Union
 
-from literature_database.schema import PaperResource
+from app.papers.schema import PaperResource
 
 from .cleaner import TextCleaner
 from .config import RAGSettings
@@ -111,7 +111,7 @@ class RAGReader:
         """
         if not isinstance(resource, PaperResource):
             raise TypeError(
-                "resource must be a literature_database.schema.PaperResource"
+                "resource must be an app.papers.schema.PaperResource"
             )
 
         document = self.document_loader.load(resource)

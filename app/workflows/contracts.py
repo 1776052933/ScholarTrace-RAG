@@ -8,7 +8,7 @@ import re
 from time import perf_counter
 from typing import Any, Dict, Optional
 
-from query_decomposition.schema import SubQuery as DecompositionSubQuery
+from app.research.decomposition.schema import SubQuery as DecompositionSubQuery
 
 logger = logging.getLogger("auto_paper")
 

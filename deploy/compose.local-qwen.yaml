@@ -1,0 +1,21 @@
+# Start scripts/start_local_qwen.ps1 in the same PowerShell session first.
+# The secret stays in F:\qwen\local_api_key.txt, outside the repository.
+services:
+  api:
+    environment:
+      DEEPSEEK_API_KEY: ${LOCAL_QWEN_API_KEY:?Run scripts/start_local_qwen.ps1 first}
+      DEEPSEEK_MODEL: qwen3-4b-local
+      DEEPSEEK_BASE_URL: http://host.docker.internal:18510/v1
+      DEEPSEEK_TIMEOUT: '180'
+      NO_PROXY: localhost,127.0.0.1,host.docker.internal,mysql,milvus,redis
+      CHAT_PROMPT_MAX_CHARS: '10000'
+      CHAT_MAX_OUTPUT_TOKENS: '1024'
+  worker:
+    environment:
+      DEEPSEEK_API_KEY: ${LOCAL_QWEN_API_KEY:?Run scripts/start_local_qwen.ps1 first}
+      DEEPSEEK_MODEL: qwen3-4b-local
+      DEEPSEEK_BASE_URL: http://host.docker.internal:18510/v1
+      DEEPSEEK_TIMEOUT: '180'
+      NO_PROXY: localhost,127.0.0.1,host.docker.internal,mysql,milvus,redis
+      CHAT_PROMPT_MAX_CHARS: '10000'
+      CHAT_MAX_OUTPUT_TOKENS: '1024'

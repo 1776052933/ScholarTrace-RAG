@@ -15,7 +15,7 @@ from sqlalchemy import select
 from app.api.main import create_app
 from app.services.conversations import ConversationBusyError, ConversationSettings
 from app.storage.models import ConversationModel, ConversationTurnModel, utc_now
-from literature_database.models import PaperModel
+from app.papers.models import PaperModel
 from rag_reader.llm_client import DeepSeekClient, DeepSeekResponseError
 from rag_reader.qa import PaperQA, RAGAnswerParseError, _fit_evidence
 from rag_reader.schema import DocumentChunk

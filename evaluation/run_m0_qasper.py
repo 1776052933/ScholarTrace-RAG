@@ -13,7 +13,7 @@ import time
 import traceback
 from typing import Any
 
-from literature_database.schema import PaperMetadata, PaperResource
+from app.papers.schema import PaperMetadata, PaperResource
 from rag_reader.embedding import EmbeddingModel
 from rag_reader.llm_client import DeepSeekClient
 from rag_reader.pipeline import RAGReader

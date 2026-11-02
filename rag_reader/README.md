@@ -1,7 +1,7 @@
 # RAG Reader
 
 `rag_reader` 是 Auto_paper 的独立论文深度理解模块。它接收
-`literature_database` 提供的 `PaperResource`，将论文全文转换为可检索的向量索引，
+`app.papers` 提供的 `PaperResource`，将论文全文转换为可检索的向量索引，
 并提供结构化知识抽取、基于证据的论文问答和论文摘要能力。
 
 模块不提供 Web 或 FastAPI 接口，其他 Agent 可以直接调用 `RAGReader`。
@@ -169,7 +169,7 @@ reader = RAGReader(vector_store=vector_store)
 ```python
 import json
 
-from literature_database.schema import (
+from app.papers.schema import (
     PaperAvailability,
     PaperMetadata,
     PaperResource,

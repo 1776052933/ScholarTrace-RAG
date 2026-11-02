@@ -12,6 +12,7 @@ from ai_components.chains import generate_text, text_chain
 from ai_components.models import as_chat_model
 from app.services.workflow import AutoPaperWorkflow, WorkflowCancelled
 from app.workflows.discovery import DiscoveryGraph
+from rag_reader.answer_graph import AnswerGraph
 from rag_reader.langchain_retriever import ScopedPaperRetriever, to_chunk, to_document
 from rag_reader.qa import PaperQA, RAGAnswerParseError
 from rag_reader.schema import DocumentChunk
@@ -164,6 +165,21 @@ def test_invalid_stream_never_emits_validated_answer():
     assert transport.closed
 
 
+def test_final_answer_is_emitted_after_langgraph_stream_finishes():
+    state = {"finished": False}
+
+    def graph_stream(*args, **kwargs):
+        yield "updates", {"validate": {"answer": {"answer": "done"}}}
+        state["finished"] = True
+
+    graph = AnswerGraph(Retrieval(), lambda: Transport(), lambda *args, **kwargs: "question")
+    graph.graph = NS(stream=graph_stream)
+    events = list(graph.stream(["a"], "question"))
+
+    assert state["finished"]
+    assert events == [{"event": "answer", "data": {"answer": "done"}}]
+
+
 @pytest.mark.parametrize("citations", [False, True])
 def test_discovery_graph_branches_preserve_time_filter_and_stage_outputs(citations):
     calls, order = Calls(), []
@@ -226,8 +242,8 @@ def test_cancelled_discovery_does_not_register_or_ingest():
 def test_discovery_runs_real_search_subgraph_with_checkpoint(tmp_path):
     from test_m1_service import Stage, Literature
     from test_m5_workflow import _Planner, _Searcher, _Evaluator, _Reflector
-    from search_agent.config import SearchAgentConfig
-    from search_agent.pipeline import SearchAgent
+    from app.research.search.config import SearchAgentConfig
+    from app.research.search.pipeline import SearchAgent
 
     agent = SearchAgent(config=SearchAgentConfig(max_rounds=2, use_llm=False),
                         planner=_Planner(), searcher=_Searcher(),

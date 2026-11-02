@@ -1,9 +1,9 @@
 """Stable paper identifiers across search, ranking, and registration."""
 
-from literature_database.paper_manager import _metadata
-from ranking_agent.pipeline import _paper as ranking_paper
-from search_agent.schema import PaperMetadata
-from search_agent.searcher import deduplicate_papers, to_internal_paper
+from app.papers.paper_manager import _metadata
+from app.research.ranking.pipeline import _paper as ranking_paper
+from app.research.search.schema import PaperMetadata
+from app.research.search.searcher import deduplicate_papers, to_internal_paper
 
 
 def test_search_ranking_and_database_keep_one_arxiv_identity():

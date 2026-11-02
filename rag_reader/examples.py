@@ -20,7 +20,7 @@ from typing import Any, Dict, Sequence
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from literature_database.schema import (  # noqa: E402
+from app.papers.schema import (  # noqa: E402
     PaperAvailability,
     PaperMetadata,
     PaperResource,

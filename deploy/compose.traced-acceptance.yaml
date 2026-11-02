@@ -1,0 +1,11 @@
+# Public-PDF regression with LangSmith enabled. Keep paper-search credentials
+# empty so a fixture mismatch cannot trigger an unrelated online search.
+services:
+  api:
+    environment:
+      SERPAPI_API_KEY: ""
+      OPENALEX_API_KEY: ""
+  worker:
+    environment:
+      SERPAPI_API_KEY: ""
+      OPENALEX_API_KEY: ""

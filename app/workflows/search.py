@@ -12,12 +12,12 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from observability.tracing import trace_span
-from search_agent.pipeline import SearchAgent
-from search_agent.schema import (
+from app.research.search.pipeline import SearchAgent
+from app.research.search.schema import (
     Paper, Reflection, SearchAgentResult, SearchEvaluation, SearchInput,
     SearchIteration, SearchPlan, SearchResult, SearchStrategy,
 )
-from search_agent.searcher import deduplicate_papers, to_internal_paper
+from app.research.search.searcher import deduplicate_papers, to_internal_paper
 
 
 logger = logging.getLogger(__name__)

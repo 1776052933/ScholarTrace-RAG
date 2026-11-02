@@ -1,7 +1,7 @@
 from threading import Lock
 from time import sleep
 
-from main import _run_rag_tasks
+from app.services.workflow import _run_rag_tasks
 
 
 class ConcurrentReader:

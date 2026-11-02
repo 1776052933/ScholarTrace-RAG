@@ -43,6 +43,7 @@ class MilvusVectorStore:
         self._dimension: int | None = None
         self._fingerprint: str | None = None
         self._loaded = False
+        self._text_max_bytes = 16384
         self.index_scope = f"milvus:{self.collection_name}:{self.pipeline_signature}"
         self.index_signature: str | None = None
         if client is None:
@@ -78,6 +79,11 @@ class MilvusVectorStore:
                     )
             else:
                 self._create_collection(dimension, signature)
+                actual = self.client.describe_collection(self.collection_name)
+            for field in actual.get("fields", []):
+                if field.get("name") == "text":
+                    self._text_max_bytes = int(field.get("params", {}).get("max_length", 16384))
+                    break
             if not self._loaded:
                 self.client.load_collection(self.collection_name)
                 self._loaded = True
@@ -178,7 +184,8 @@ class MilvusVectorStore:
                 "metadata": _metadata(chunk),
                 "dense": checked,
             }
-            for name, max_bytes in (("chunk_id", 512), ("paper_id", 512), ("text", 16384), ("section", 1024)):
+            for name, max_bytes in (("chunk_id", 512), ("paper_id", 512),
+                                    ("text", self._text_max_bytes), ("section", 1024)):
                 if len(str(row[name]).encode("utf-8")) > max_bytes:
                     raise ValueError(f"{name} exceeds Milvus VARCHAR byte limit")
             rows.append(row)

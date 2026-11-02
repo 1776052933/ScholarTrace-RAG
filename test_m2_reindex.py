@@ -1,8 +1,8 @@
 """Reindex only PDFs that the legacy database judged usable."""
 from pathlib import Path
 
-from literature_database.database import DatabaseManager
-from literature_database.models import PaperFileModel, PaperModel
+from app.papers.database import DatabaseManager
+from app.papers.models import PaperFileModel, PaperModel
 from scripts import reindex_migrated_papers
 
 

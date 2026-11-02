@@ -13,7 +13,7 @@ flowchart LR
     API --> G[LangGraph 搜索 / 证据补检]
     G --> M
     G --> LLM[DeepSeek 生成]
-    API --> LF[可选 Langfuse 追踪]
+    API --> LS[可选 LangSmith 追踪]
     E[离线评测: 固定集 / Ragas / 人工审查] -.读取冻结结果.-> M
 ```
 

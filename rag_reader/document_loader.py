@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Dict, Optional, Sequence, Tuple
 
-from literature_database.schema import PaperResource
+from app.papers.schema import PaperResource
 from .errors import RAGDocumentError
 
 from .schema import PaperDocument
@@ -52,7 +52,7 @@ class DocumentLoader:
     def load(self, resource: PaperResource) -> PaperDocument:
         """将 PaperResource 转换为 PaperDocument。"""
         if not isinstance(resource, PaperResource):
-            raise TypeError("resource must be a literature_database.schema.PaperResource")
+            raise TypeError("resource must be an app.papers.schema.PaperResource")
         file_path = _path(resource.file_path)
         text_path = _path(resource.text_path)
         if file_path is None and text_path is None:

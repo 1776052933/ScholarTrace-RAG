@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
     os.environ["RANKING_CACHE_PATH"] = str(run_dir / "ranking_evaluations.sqlite3")
     if args.search_agent_llm:
         os.environ["SEARCH_AGENT_USE_LLM"] = "true"
-    from main import AutoPaperWorkflow
+    from app.services.workflow import AutoPaperWorkflow
 
     workflow = AutoPaperWorkflow(
         use_query_llm=not args.no_query_llm,

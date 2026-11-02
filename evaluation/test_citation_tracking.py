@@ -1,5 +1,5 @@
-from search_agent.citation_tracker import CitationTracker
-from search_agent.schema import PaperMetadata
+from app.research.search.citation_tracker import CitationTracker
+from app.research.search.schema import PaperMetadata
 
 
 class FakeEmbeddingModel:

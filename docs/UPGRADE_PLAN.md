@@ -33,7 +33,7 @@
 
 ## 4. 目标架构与责任
 
-架构主链：Streamlit → FastAPI → 领域服务 → MySQL / Milvus / 模型适配层。MCP 服务作为领域服务的另一入口。耗时任务经 Redis + Celery → 下载/解析/索引 Worker → PDF 持久化卷、MySQL、Milvus。LangGraph 承接搜索扩展与证据检查流程。Langfuse 观察 API、工作流和 Worker 的关键调用。
+架构主链：Streamlit → FastAPI → 领域服务 → MySQL / Milvus / 模型适配层。MCP 服务作为领域服务的另一入口。耗时任务经 Redis + Celery → 下载/解析/索引 Worker → PDF 持久化卷、MySQL、Milvus。LangGraph 承接搜索扩展与证据检查流程。LangSmith 追踪 API、工作流和 Worker 的关键调用。
 
 ### 推荐的代码边界
 
@@ -45,7 +45,7 @@
 | app/ingestion/ | 下载、解析、清洗、切块及 Celery 任务 |
 | app/retrieval/ | embedding、Milvus/BM25、融合、重排和证据组装 |
 | app/storage/ | MySQL 模型/仓库、PDF 资源、Milvus 适配器及 Alembic 迁移 |
-| app/llm/ 与 observability/ | 模型适配、提示词版本和 Langfuse 追踪 |
+| app/llm/ 与 observability/ | 模型适配、提示词版本和 LangSmith 追踪 |
 | app/mcp/、Auto_Paper_UI/ | MCP 协议入口、Streamlit HTTP 客户端和界面 |
 | evaluation/、tests/、deploy/ | 固定基准、关键测试、Compose 与演示配置 |
 
@@ -54,7 +54,7 @@
 - LangChain 用于模型、提示词、文档和工具抽象，统一重复的 DeepSeek/OpenAI 兼容调用；不强行改写所有业务代码。Milvus 混合检索若封装不足，直接使用 PyMilvus。
 - LangGraph 只管理现有 SearchAgent 循环，以及证据充分性判断、扩展搜索、重试与退出条件。给工作流设置最大迭代次数、超时和检查点。普通固定步骤的 PDF 处理交给 Celery。
 - MySQL 是论文、会话和任务状态的业务真相；Milvus 是可重建的检索索引。PDF 首期放本地持久化卷。Worker 在 Docker/WSL 内运行。
-- Langfuse 记录模型/提示词版本、检索结果、工具调用、耗时、token、费用和错误；不记录密钥。它用于运行诊断，不能代替离线效果评测。
+- LangSmith 用于查看模型输入输出、检索与工具步骤、耗时、token 和错误。开启自动追踪时，提示词和论文片段可能上传；密钥不得写入提示词。它用于运行诊断，不能代替离线效果评测。
 
 ## 5. 技术栈替换与新增
 
@@ -72,7 +72,7 @@
 | 关系库 | SQLite → MySQL + SQLAlchemy 2 + Alembic | 业务状态持久化、可重复迁移和旧数据迁移 |
 | 异步 | 内存任务/子进程 → Redis + Celery | 耗时索引、失败重试、服务重启后状态可查询 |
 | 协议 | 无 → MCP Python SDK | 供外部客户端调用真实论文能力 |
-| 观测/评测 | 基础日志/局部评测 → Langfuse + Ragas + 金标准指标 | 同时衡量质量、速度、成本和失败率 |
+| 观测/评测 | 基础日志/局部评测 → LangSmith + Ragas + 金标准指标 | 同时衡量质量、速度、成本和失败率 |
 | 交付 | 手工环境 → Docker Compose + CI + .env.example | 本地复现与自动检查，观测组件可分 profile |
 
 上表是目标清单，不代表目前已接入。框架迁移本身不预设质量提升，每项优化应有输入、输出和验收依据。
@@ -96,7 +96,7 @@
 | M2 API 与 MySQL | FastAPI 契约、Streamlit 改 HTTP、MySQL/Alembic、Docker Compose 基础服务、SQLite 数据迁移/备份、任务状态落库 | API 文档可访问；服务重启后元数据与状态仍在；前端不再启动 main.py 子进程 |
 | M3 解析与检索 | Milvus 替换 Chroma；dense 基线、BM25/RRF、cross-encoder；页/节感知切块与 Docling 复杂 PDF 路径 | 同一测试集有逐项消融；引用可定位页与原文；新旧索引不混用 |
 | M4 异步与交互 | Redis/Celery 入库、重试与幂等；候选选文、预建库、进度、失败处理、多篇问答和导出 | 正常/下载失败/解析失败/服务重启可演示；用户可选择论文 |
-| M5 工作流与 MCP | 搜索循环迁入 LangGraph、证据不足分支和次数上限；MCP 共享服务；Langfuse 追踪 | 图的节点与退出条件可解释；外部 MCP 客户端可搜索/问答；调用链可追踪 |
+| M5 工作流与 MCP | 搜索循环迁入 LangGraph、证据不足分支和次数上限；MCP 共享服务；LangSmith 追踪 | 图的节点与退出条件可解释；外部 MCP 客户端可搜索/问答；调用链可追踪 |
 | M6 评测与交付 | 固定检索/QA 基准、人工审查和错误分析；完善 Compose、CI、种子数据、README、架构图、演示脚本 | 新环境按文档启动；无密钥核心测试自动通过；报告含基线、收益、代价与失败案例 |
 
 ### 各阶段首次接入的技术
@@ -108,10 +108,10 @@
 | M2 | FastAPI、Uvicorn、MySQL 驱动、Alembic、Docker Compose 基础服务 | SQLAlchemy、Streamlit |
 | M3 | Milvus、PyMilvus、Milvus 内建 BM25、RRF 融合、cross-encoder 重排、Docling 按需解析 | BGE-M3 embedding、PyMuPDF |
 | M4 | Redis、Celery；Streamlit 界面和 Plotly 图表升级 | FastAPI、MySQL、Milvus |
-| M5 | LangGraph、MCP Python SDK、Langfuse | LangChain、领域服务和异步入库 |
+| M5 | LangGraph、MCP Python SDK、LangSmith | LangChain、领域服务和异步入库 |
 | M6 | Ragas、GitHub Actions；完善 Compose 配置、评测报告与演示交付 | 复用并联调 M0–M5 的完整系统 |
 
-BM25、RRF 和 RAG 是检索方法或系统范式，并非必须单独安装的框架。Docker Compose 从 M2 引入，之后随 Milvus、Redis/Celery、Langfuse 等服务逐步扩充；M6 才做最终集成与复现检查。M0 已建立评测基线，M6 再用冻结版本做全面评测。
+BM25、RRF 和 RAG 是检索方法或系统范式，并非必须单独安装的框架。Docker Compose 从 M2 引入，之后随 Milvus、Redis/Celery 等服务逐步扩充；LangSmith 通过 SDK 可选连接，不由本项目 Compose 启动。M6 才做最终集成与复现检查。M0 已建立评测基线，M6 再用冻结版本做全面评测。
 
 ## 8. 数据集、训练与评测
 
@@ -144,7 +144,7 @@ BM25、RRF 和 RAG 是检索方法或系统范式，并非必须单独安装的�
 ## 10. 风险、取舍与面试材料
 
 1. 学术 API 可能限流或缺 PDF。演示和正式基准用固定语料；在线搜索单独测试。
-2. Milvus、MySQL、Redis、Langfuse、Docling/重排模型可能占用较多本机资源。Compose 区分核心与观测 profile，解析/重排按需启用并记录硬件；目标版本仍包含 Milvus、MySQL、MCP。
+2. Milvus、MySQL、Redis、Docling/重排模型可能占用较多本机资源；解析/重排按需启用并记录硬件。LangSmith 追踪需要网络和凭据，开启后应确认上传数据范围。
 3. PDF、MySQL、Milvus 跨系统写入可能部分成功。任务状态、幂等键、重试、索引版本和重建工具必须配套。
 4. 面试时要能解释为什么搜索循环用图、为什么文档入库用任务队列、两者的替代方案和代价。
 5. 只提交可分发的示例 PDF 或元数据；真实密钥通过环境变量注入。
@@ -157,7 +157,7 @@ BM25、RRF 和 RAG 是检索方法或系统范式，并非必须单独安装的�
 
 - [LangGraph 官方文档](https://docs.langchain.com/oss/python/langgraph/overview)、[Milvus BM25 全文检索](https://milvus.io/docs/full-text-search.md)
 - [FastAPI 后台任务](https://fastapi.tiangolo.com/tutorial/background-tasks/)、[Celery](https://docs.celeryq.dev/en/stable/getting-started/introduction.html)
-- [Docling](https://github.com/docling-project/docling)、[Langfuse](https://langfuse.com/docs/observability/data-model)、[Ragas 指标](https://docs.ragas.io/en/latest/concepts/metrics/available_metrics/)
+- [Docling](https://github.com/docling-project/docling)、[LangSmith 追踪](https://docs.langchain.com/langsmith/trace-with-langchain)、[Ragas 指标](https://docs.ragas.io/en/latest/concepts/metrics/available_metrics/)
 - [MCP 工具规范](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)、[Docker Compose](https://docs.docker.com/compose/)、[Alembic](https://alembic.sqlalchemy.org/en/latest/)
 
 

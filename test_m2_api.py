@@ -12,7 +12,7 @@ from sqlalchemy import select
 from app.api.main import create_app
 from app.services.workflow import WorkflowCancelled
 from app.storage.models import ResearchJobModel
-from literature_database.models import PaperModel
+from app.papers.models import PaperModel
 
 
 class ImmediateWorkflow:

@@ -8,9 +8,9 @@ from contextlib import contextmanager
 from rag_reader.evidence_graph import EvidenceGraph
 from app.workflows.search import GraphSearchAgent
 from rag_reader.schema import DocumentChunk
-from search_agent.config import SearchAgentConfig
-from search_agent.pipeline import SearchAgent
-from search_agent.schema import (
+from app.research.search.config import SearchAgentConfig
+from app.research.search.pipeline import SearchAgent
+from app.research.search.schema import (
     PaperMetadata, SearchEvaluation, SearchInput, SearchResult, SearchStrategy, SearchTask,
 )
 
@@ -237,26 +237,30 @@ def test_mcp_client_can_discover_and_call_tools(monkeypatch):
 
 
 def test_rag_trace_records_nodes_and_token_usage_without_paper_text(monkeypatch):
+    import langsmith
     from observability import tracing
     from rag_reader.qa import PaperQA
 
     observations = []
 
-    class Span:
+    class Run:
         def __init__(self, entry):
             self.entry = entry
 
-        def update(self, **kwargs):
-            self.entry["updates"].append(kwargs)
+        def add_outputs(self, output):
+            self.entry["outputs"].append(output)
 
-    class Client:
-        @contextmanager
-        def start_as_current_observation(self, **kwargs):
-            entry = {"start": kwargs, "updates": []}
-            observations.append(entry)
-            yield Span(entry)
+        def add_metadata(self, metadata):
+            self.entry["metadata"].append(metadata)
 
-    monkeypatch.setattr(tracing, "_client", lambda: Client())
+    @contextmanager
+    def fake_trace(name, **kwargs):
+        entry = {"name": name, "start": kwargs, "outputs": [], "metadata": []}
+        observations.append(entry)
+        yield Run(entry)
+
+    monkeypatch.setattr(tracing, "_client", lambda: object())
+    monkeypatch.setattr(langsmith, "trace", fake_trace)
 
     class Retriever:
         def retrieve(self, paper_id, question, *, top_k):
@@ -273,11 +277,12 @@ def test_rag_trace_records_nodes_and_token_usage_without_paper_text(monkeypatch)
 
     answer = PaperQA(Retriever(), llm_client=LLM()).ask("a", "question")
     assert answer.sources == ["a-1"]
-    names = [entry["start"]["name"] for entry in observations]
+    names = [entry["name"] for entry in observations]
     assert "rag.evidence_graph" in names and "rag.evidence.assess" in names
     generation = next(entry for entry in observations
-                      if entry["start"]["name"] == "rag.answer_generation")
-    assert generation["updates"][0]["usage_details"] == {
+                      if entry["name"] == "rag.answer_generation")
+    assert generation["start"]["run_type"] == "chain"
+    assert generation["metadata"][0]["usage_details"] == {
         "input_tokens": 11, "output_tokens": 7,
     }
     assert "Evidence 1" not in str(observations)

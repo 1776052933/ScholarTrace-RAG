@@ -7,9 +7,9 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from literature_database.database import DatabaseManager
-from literature_database.models import PaperFileModel, PaperModel
-from literature_database.schema import PaperAvailability, PaperMetadata, PaperResource
+from app.papers.database import DatabaseManager
+from app.papers.models import PaperFileModel, PaperModel
+from app.papers.schema import PaperAvailability, PaperMetadata, PaperResource
 from rag_reader.pipeline import RAGReader
 from rag_reader.vector_store import VectorStore
 from rag_reader.config import RAGSettings

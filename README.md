@@ -2,7 +2,7 @@
 
 输入研究问题后，项目依次完成查询理解与拆解、多来源论文检索、引文扩展、论文排序、开放全文获取，以及基于论文内容的摘要、知识抽取和问答。
 
-M2 已接入 FastAPI、MySQL/Alembic 和 Streamlit HTTP 客户端；M3 已完成 Milvus 检索消融和复杂 PDF 首轮对照；M4 已接入 Redis/Celery 选文入库、失败重试和多论文证据问答；M5 接入 LangGraph 搜索与证据补检工作流、MCP 服务及可选的 Langfuse 追踪。M6 加入固定留出集消融、跨论文证据对照、离线 Ragas、人工复核表和 GitHub Actions。先看 [M6 评测报告](docs/M6_REPORT.md)与[M6 运行及演示](docs/M6_RUN_AND_ACCEPTANCE.md)；此前阶段见 [M5 运行与验收](docs/M5_RUN_AND_ACCEPTANCE.md)、[M4 运行与验收](docs/M4_RUN_AND_ACCEPTANCE.md)、[M3 运行与验收](docs/M3_RUN_AND_ACCEPTANCE.md)和[升级计划](docs/UPGRADE_PLAN.md)。数据集位置见[数据集说明](docs/DATASETS.md)；[M0 评测说明](evaluation/M0.md)、[M0 十题基线](evaluation/M0_BASELINE.md)和[M1 对照](evaluation/M1_COMPARISON.md)可用于同输入复测。[版本归档与 M1 工程验收](docs/VERSION_ARCHIVE_AND_M1_ACCEPTANCE.md)记录了早期源码和验收边界。
+M2 已接入 FastAPI、MySQL/Alembic 和 Streamlit HTTP 客户端；M3 已完成 Milvus 检索消融和复杂 PDF 首轮对照；M4 已接入 Redis/Celery 选文入库、失败重试和多论文证据问答；M5 接入 LangGraph 搜索与证据补检工作流、MCP 服务及可选的 LangSmith 追踪。M6 加入固定留出集消融、跨论文证据对照、离线 Ragas、人工复核表和 GitHub Actions。先看 [M6 评测报告](docs/M6_REPORT.md)与[M6 运行及演示](docs/M6_RUN_AND_ACCEPTANCE.md)；此前阶段见 [M5 运行与验收](docs/M5_RUN_AND_ACCEPTANCE.md)、[M4 运行与验收](docs/M4_RUN_AND_ACCEPTANCE.md)、[M3 运行与验收](docs/M3_RUN_AND_ACCEPTANCE.md)和[升级计划](docs/UPGRADE_PLAN.md)。数据集位置见[数据集说明](docs/DATASETS.md)；[M0 评测说明](evaluation/M0.md)、[M0 十题基线](evaluation/M0_BASELINE.md)和[M1 对照](evaluation/M1_COMPARISON.md)可用于同输入复测。[版本归档与 M1 工程验收](docs/VERSION_ARCHIVE_AND_M1_ACCEPTANCE.md)记录了早期源码和验收边界。
 
 核心 AI 流程已统一为 [LangChain 组件接口与 LangGraph 工作流](docs/LANGCHAIN_ARCHITECTURE.md)：模型生成使用共享 LCEL 链，检索与嵌入提供标准接口；论文发现图编排理解、拆解、搜索、可选引文扩展与排序，问答图编排改写、证据检索、上下文控制、生成与引用校验。FastAPI、MySQL、Celery 保留应用层职责。当前实现没有多个自主 Agent 之间的任务委派与协作机制。
 
@@ -15,16 +15,18 @@ M2 已接入 FastAPI、MySQL/Alembic 和 Streamlit HTTP 客户端；M3 已完成
 | 目录 | 职责 |
 | --- | --- |
 | `ai_components/` | LangChain ChatModel 适配与共享 LCEL 生成链 |
-| `query_understanding/`、`query_decomposition/` | 理解和拆解研究问题 |
-| `search_agent/` | 搜索 Google Scholar、arXiv、OpenAlex，并扩展引文关系 |
-| `ranking_agent/` | 用 BGE-M3、元数据特征和大模型评分排序论文 |
-| `paper_downloader/`、`literature_database/` | 获取开放全文，管理下载状态及论文记录 |
+| `app/research/understanding/`、`app/research/decomposition/` | 理解和拆解研究问题 |
+| `app/research/search/`、`app/research/ranking/` | 多来源论文搜索、引文扩展与候选排序 |
+| `paper_downloader/`、`app/papers/` | 获取开放全文，管理下载状态及论文记录 |
 | `rag_reader/` | 解析全文、切分、向量检索、摘要、知识抽取与证据问答 |
 | `evaluation/` | 固定语料检索、QASPER 消融、跨论文证据对照、离线 Ragas 与人工复核工具 |
 | `Auto_Paper_UI/` | Streamlit HTTP 界面、候选选文、入库进度、多论文问答与导出 |
+| `main.py`、`app/cli.py` | 命令行启动入口与参数处理；业务执行由 `app/services/workflow.py` 负责 |
 | `app/api/`、`app/services/`、`app/tasks.py` | FastAPI 契约、MySQL 持久化状态、Celery 入库、论文问答与领域工作流 |
 | `app/storage/`、`migrations/` | MySQL 业务表和 Alembic 迁移 |
-| `app/workflows/`、`app/mcp/`、`observability/` | LangGraph 论文发现与搜索图、MCP 工具、Langfuse 追踪 |
+| `app/workflows/`、`app/mcp/`、`observability/` | LangGraph 论文发现与搜索图、MCP 工具、LangSmith 追踪 |
+
+论文发现相关实现统一放在 [`app/research/`](app/research/README.md)，论文资源与持久化放在 [`app/papers/`](app/papers/README.md)。旧顶层 `query_understanding`、`query_decomposition`、`search_agent`、`ranking_agent` 和 `literature_database` 导入路径已移除。命令行继续使用 `python main.py`，程序化调用工作流请从 `app.services.workflow` 导入 `AutoPaperWorkflow`。
 
 ## 运行
 

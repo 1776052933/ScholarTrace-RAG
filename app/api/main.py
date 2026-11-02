@@ -32,8 +32,8 @@ from app.services.library import PaperLibraryService, LibraryConflictError
 from rag_reader.errors import RAGError
 from rag_reader.config import RAGSettings
 from rag_reader.store_factory import milvus_index_scope
-from literature_database.database import DatabaseManager
-from literature_database.models import PaperModel, PaperFileModel
+from app.papers.database import DatabaseManager
+from app.papers.models import PaperModel, PaperFileModel
 import app.storage.models  # noqa: F401 - register M2 ORM tables
 
 

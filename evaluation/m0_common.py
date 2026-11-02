@@ -54,7 +54,7 @@ def code_hash() -> str:
         *sorted((ROOT / "evaluation").glob("run_m0*.py")),
         ROOT / "evaluation" / "metrics.py",
         ROOT / "evaluation" / "litsearch.py",
-        ROOT / "literature_database" / "schema.py",
+        ROOT / "app" / "papers" / "schema.py",
     ]
     digest = hashlib.sha256()
     for path in files:

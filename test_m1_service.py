@@ -1,7 +1,7 @@
 """CLI compatibility after moving the workflow into the service package."""
 
 from app.services.workflow import AutoPaperWorkflow
-from main import AutoPaperWorkflow as CliWorkflow
+from app.cli import AutoPaperWorkflow as CliWorkflow
 
 
 class Stage:

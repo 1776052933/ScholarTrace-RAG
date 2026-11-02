@@ -11,6 +11,7 @@ import argparse
 from copy import deepcopy
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -36,8 +37,8 @@ def request(client, method, path, **kwargs):
 
 def ingest(client, report):
     from app.storage.models import ResearchJobModel
-    from literature_database.database import DatabaseManager
-    from literature_database.models import PaperFileModel, PaperModel
+    from app.papers.database import DatabaseManager
+    from app.papers.models import PaperFileModel, PaperModel
     from uuid import uuid4
 
     db = DatabaseManager(os.environ["DATABASE_URL"])
@@ -129,7 +130,16 @@ def validate_answer(client, result, ids, *, require_citations=True):
     assert all(c["paper_id"] in ids and c["page"] >= 1 and c["excerpt"].strip() for c in citations)
     assert set(answer["sources"]) == {c["chunk_id"] for c in citations}
     evidence = request(client, "GET", f"/api/v1/answers/{result['answer_id']}/evidence")
-    assert evidence == citations
+    assert len(evidence) == len(citations)
+    for stored, returned in zip(evidence, citations):
+        assert stored.keys() == returned.keys()
+        for key in returned:
+            if key == "retrieval_score" and returned[key] is not None:
+                # MySQL JSON round-tripping may change the final float digit.
+                assert math.isclose(float(stored[key]), float(returned[key]),
+                                    rel_tol=1e-9, abs_tol=1e-9)
+            else:
+                assert stored[key] == returned[key]
     exported = client.get(f"/api/v1/answers/{result['answer_id']}/export")
     exported.raise_for_status()
     assert answer["answer"] in exported.text
@@ -164,7 +174,9 @@ def stream_turn(client, cid, question):
 def model(client, report, path):
     assert report.get("ingest_status") == "passed", "Finish ingestion before calling the provider"
     if report.get("model_started"):
-        raise ValueError("This report already started model calls; use a new output only after reviewing it")
+        revalidate_recorded_model(client, report)
+        save(path, report)
+        return
     report.update(model_started=True, model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
                   planned_logical_provider_operations=6, cases=[])
     save(path, report)
@@ -230,6 +242,44 @@ def model(client, report, path):
     report["model_complete"] = True
 
 
+def revalidate_recorded_model(client, report):
+    """Finish a fully recorded run without paying for the same answers again."""
+    names = [case.get("name") for case in report.get("cases", [])]
+    expected = ["single_table", "stream_first", "stream_followup",
+                "multi_paper", "insufficient_evidence"]
+    if names != expected or not report.get("conversation_id"):
+        raise ValueError("Incomplete recorded model run; inspect it before any new provider calls")
+    cases = {case["name"]: case for case in report["cases"]}
+    for name in expected:
+        case = cases[name]
+        result = case["result"]
+        validate_answer(client, result, PAPERS if name == "multi_paper" else PAPERS[:1],
+                        require_citations=name != "insufficient_evidence")
+        answer = result["answer"]["answer"]
+        if name == "single_table":
+            assert all(value in answer for value in ["28.4", "41.8"])
+        elif name in {"stream_first", "stream_followup"}:
+            assert re.search(r"\b6\b|六|six", answer, re.I)
+            events = case["events"]
+            deltas = [event for event in events if event["event"] == "delta"]
+            dones = [event for event in events if event["event"] == "done"]
+            assert len(deltas) > 1 and len(dones) == 1
+            assert deltas[0]["seconds"] < dones[0]["seconds"]
+            assert "".join(event["data"]["text"] for event in deltas) == answer
+            assert result["context"]["history_turns"] == (1 if name == "stream_followup" else 0)
+        elif name == "multi_paper":
+            assert {citation["paper_id"] for citation in result["answer"]["citations"]} == set(PAPERS)
+            assert "翻译" in answer and any(word in answer for word in ["操作", "抓取"])
+        else:
+            assert any(word in answer for word in ["无法", "未提供", "未提及", "没有提供", "不能确定"])
+            assert result["answer"]["confidence"] <= 0.5
+        case["passed"] = True
+    snapshot = request(client, "GET", f"/api/v1/conversations/{report['conversation_id']}")
+    assert [turn["status"] for turn in snapshot["turns"]] == ["completed", "completed"]
+    report["conversation_before_restart"] = snapshot
+    report["model_complete"] = True
+
+
 def verify(client, report):
     assert report.get("model_complete"), "Complete model phase before restart verification"
     snapshot = request(client, "GET", f"/api/v1/conversations/{report['conversation_id']}")
@@ -239,7 +289,7 @@ def verify(client, report):
         validate_answer(client, result, PAPERS, require_citations=case["name"] != "insufficient_evidence")
     # Reopen the real vector store and embedding model after restart without LLM calls.
     from app.services.questions import QuestionService
-    from literature_database.database import DatabaseManager
+    from app.papers.database import DatabaseManager
     database = DatabaseManager(os.environ["DATABASE_URL"])
     try:
         reader = QuestionService(database, Path("/app/data/m2")).reader_for(PAPERS[:1])
@@ -263,6 +313,7 @@ def main():
     report = json.loads(args.output.read_text(encoding="utf-8")) if args.output.exists() else {}
     report.setdefault("schema_version", "deployment-regression-v1")
     report.setdefault("scope", "2 public PDFs; fixed smoke questions, not a quality benchmark")
+    revalidating = args.phase == "model" and bool(report.get("model_started"))
     start = time.monotonic()
     try:
         with httpx.Client(base_url=args.api_url, timeout=180) as client:
@@ -274,12 +325,14 @@ def main():
             else:
                 verify(client, report)
         report[args.phase + "_status"] = "passed"
+        report.pop(args.phase + "_error", None)
     except Exception as exc:
         report[args.phase + "_status"] = "failed"
         report[args.phase + "_error"] = f"{type(exc).__name__}: {exc}"
         raise
     finally:
-        report[args.phase + "_seconds"] = round(time.monotonic() - start, 2)
+        duration_key = "model_revalidation_seconds" if revalidating else args.phase + "_seconds"
+        report[duration_key] = round(time.monotonic() - start, 2)
         save(args.output, report)
 
 

@@ -7,8 +7,8 @@ from typing import Any
 
 from app.storage.models import MultiPaperAnswerModel, QuestionAnswerModel
 from app.config import ModelSettings
-from literature_database.database import DatabaseManager
-from literature_database.models import PaperModel
+from app.papers.database import DatabaseManager
+from app.papers.models import PaperModel
 from rag_reader.config import RAGSettings
 from rag_reader.llm_client import DeepSeekClient
 from rag_reader.pipeline import RAGReader

@@ -44,6 +44,10 @@ flowchart TD
 
 | 文件 | 职责 |
 | --- | --- |
+| `main.py`、`app/cli.py` | 根目录启动入口与命令行参数处理；CLI 只调用应用服务 |
+| `app/services/workflow.py` | 论文发现结果与注册、下载、阅读阶段的应用层衔接 |
+| `app/research/` | 查询理解、拆解、论文搜索和排序的领域实现；详见 `app/research/README.md` |
+| `app/papers/` | 论文资源模型、数据库仓储和 PDF 下载协调；详见 `app/papers/README.md` |
 | `ai_components/models.py` | `ProviderChatModel(BaseChatModel)`；标准消息、invoke/batch/stream、回调与 usage；支持直接注入原生 LangChain ChatModel |
 | `ai_components/chains.py` | `ChatPromptTemplate → ChatModel → StrOutputParser` 的共享 LCEL 链 |
 | `rag_reader/langchain_retriever.py` | `ScopedPaperRetriever(BaseRetriever)`；固定论文范围；Document 与 DocumentChunk 无损转换 |
@@ -73,7 +77,7 @@ Retriever 适配器保留 paper_id、chunk_id、page、section、title、retriev
 - 对话历史仍存 MySQL；问答图没有持久化 checkpoint，不会从半段流式答案继续生成。
 - 搜索图保留 SQLite checkpoint；存在 checkpoint 不代表已实现跨进程自动恢复所有业务步骤。
 - 预算仍按序列化消息字符计数，不是精确 token 计数。本次单轮问答也开始使用同一默认 24000 字符预算；极长输入可能被裁剪或明确拒绝。
-- 原有 Langfuse 手工 span 保留。LangChain callbacks 已可传递和测试，没有默认开启新的外部追踪服务。
+- 使用 LangSmith 追踪应用边界；开启 `LANGSMITH_TRACING` 后，LangChain/LangGraph 运行会自动形成子节点。默认关闭，配置与数据范围见 [LangSmith 追踪说明](LANGSMITH_TRACING.md)。
 
 ## 验收方式
 

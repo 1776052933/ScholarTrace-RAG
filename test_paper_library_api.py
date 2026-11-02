@@ -9,8 +9,8 @@ import fitz
 
 from app.api.main import create_app
 from app.storage.models import ResearchJobModel
-from literature_database.models import PaperModel
-from literature_database.service import LiteratureService
+from app.papers.models import PaperModel
+from app.papers.service import LiteratureService
 
 
 def _pdf() -> bytes:

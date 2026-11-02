@@ -13,8 +13,8 @@ from app.storage.models import (
     ConversationModel, MultiPaperAnswerModel, PaperCollectionItemModel,
     PaperCollectionModel, QuestionAnswerModel, ResearchJobModel, utc_now,
 )
-from literature_database.database import DatabaseManager
-from literature_database.models import PaperFileModel, PaperModel
+from app.papers.database import DatabaseManager
+from app.papers.models import PaperFileModel, PaperModel
 
 
 class LibraryConflictError(ValueError):

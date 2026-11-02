@@ -1,5 +1,5 @@
-from search_agent.schema import PaperMetadata, SearchPlan, SearchQuery
-from search_agent.searcher import PaperSearcher
+from app.research.search.schema import PaperMetadata, SearchPlan, SearchQuery
+from app.research.search.searcher import PaperSearcher
 from evaluation.scholargym import scholar_gym_cutoff
 from evaluation.run_pasa import _evaluate_one as evaluate_pasa_one
 from evaluation.run_scholargym import _evaluate_one as evaluate_scholargym_one

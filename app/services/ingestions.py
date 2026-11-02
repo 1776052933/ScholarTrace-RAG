@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.schemas import IngestionRequest, JobSnapshot
 from app.services.jobs import JobStore, _safe_message
 from app.storage.models import ResearchJobModel, utc_now
-from literature_database.database import DatabaseManager
+from app.papers.database import DatabaseManager
 
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ class IngestionJobService:
         run_ingestion.apply_async(args=[job_id], task_id=f"ingest-{job_id}")
 
     def _literature_service(self) -> Any:
-        from literature_database.service import LiteratureService
+        from app.papers.service import LiteratureService
         return LiteratureService(self.database, create_tables=False)
 
     def _rag_reader(self) -> Any:

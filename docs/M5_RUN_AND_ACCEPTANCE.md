@@ -18,7 +18,7 @@
 
 通过 `python -m app.mcp.server --transport stdio` 可供本机进程启动；Compose 中的独立服务使用 Streamable HTTP，默认地址为 `http://127.0.0.1:8001/mcp`。MCP 端口仅绑定本机回环地址。远程部署前需再设计身份认证和访问控制。
 
-Langfuse 追踪记录研究任务、搜索各节点、证据检索各节点和答案生成的耗时与结构化结果，答案生成还记录模型名和 token 用量。追踪不上传完整论文片段或密钥。将 `LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY`、`LANGFUSE_BASE_URL` 配在本机 `.env` 后启用；未配置时业务正常运行。Langfuse 官方自建方案需要额外的 PostgreSQL、ClickHouse、对象存储、Redis、Web 与 Worker，可使用[官方 Docker Compose](https://github.com/langfuse/langfuse/blob/main/docker-compose.yml) 单独部署。本项目的基础 Compose 不隐式启动这些服务。
+当前版本改用 LangSmith：应用层记录任务、搜索、检索、生成的结构化边界；开启追踪后，LangChain/LangGraph 自动记录子运行。配置方法和可能上传的数据见 [LangSmith 追踪说明](LANGSMITH_TRACING.md)。未配置时业务正常运行。
 
 ## 启动与验证
 
@@ -35,7 +35,7 @@ docker compose ps
 python -m pytest -q test_m5_workflow.py test_m4_async.py test_m3_retrieval.py test_m3_api.py test_m2_api.py test_m1_rag.py test_m1_service.py
 ```
 
-真实验收依次检查：搜索图的持久化状态与退出理由、MCP 客户端 `list_tools` 和只读任务/证据调用、Milvus 多论文证据分支、Langfuse 实例中的同一请求子节点。实时搜索与生成会调用外部服务，需使用本机配置的密钥；离线回归不需要这些密钥。
+真实验收依次检查：搜索图的持久化状态与退出理由、MCP 客户端 `list_tools` 和只读任务/证据调用、Milvus 多论文证据分支；LangSmith 页面中的同一请求子节点需另行验收。实时搜索与生成会调用外部服务，需使用本机配置的密钥；离线回归不需要这些密钥。
 
 ## 本机验收记录
 
@@ -46,10 +46,9 @@ python -m pytest -q test_m5_workflow.py test_m4_async.py test_m3_retrieval.py te
 | LangGraph 搜索退出与持久化 | 假检索器验证质量达标、最大轮次、轮后超时三条退出路径；SQLite 中有多步 checkpoint |
 | 证据补检 | 假检索器验证仅扩展覆盖不足论文及补检次数上限；真实 Milvus 集合 `paper_chunks_m4_accept_20261017` 对两篇已入库论文补检后得到 7 条有页码片段，分别为 2、5 条 |
 | MCP 协议 | 独立 MCP 客户端通过真实 HTTP 端点列出 5 个工具，读取现有任务状态，读取已有答案的 5 条引用证据 |
-| Langfuse SDK 导出 | SDK 向本机临时 OTLP 接收器发出 1 次请求，包含研究任务、真实搜索图的 5 个节点和答案生成共 8 个 span；抽查的 3 条父子关系正确 |
 
 2026-10-18 在隔离环境中运行 M1–M5 受影响路径回归，共 **32 项通过**；生产 API 容器自带 `DATABASE_URL`，会覆盖这些测试的临时 SQLite 配置，因此回归测试须在不注入生产数据库环境变量的容器中执行。
 
 同日从 `deploy/Dockerfile` 构建 M5 正式镜像，`pip check` 无依赖冲突；通过 Compose 启动全部 10 个服务，MySQL、Redis、Milvus、API、UI 的健康检查通过，MCP、worker、beat 保持运行。正式镜像中的 MCP 客户端列出 5 个工具，并从现有答案读取 5 条证据；Milvus 上两篇已入库论文经一次补检得到 7 条片段，分别为 2、5 条，覆盖检查结果为 `covered`；本机 OTLP 接收器也收到了 8 个有父子关系的追踪节点。本机验收使用 `tmp/m4_accept_override.yaml` 将 API/UI 映射到 18000/18501，并复用已有测试集合；MCP 仍映射到 8001。
 
-这轮未调用新的 DeepSeek 生成接口，也未连接实际 Langfuse Web 实例；因此不能把上述结果写成真实回答质量提升或 Langfuse 页面验收。真实质量收益将在 M6 固定问题集上衡量。
+这轮未调用新的 DeepSeek 生成接口；也不能将此前验收视作当前 LangSmith 页面验收。真实质量收益将在 M6 固定问题集上衡量。

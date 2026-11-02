@@ -5,7 +5,7 @@ import json
 import fitz
 import pytest
 
-from literature_database.schema import PaperMetadata, PaperResource
+from app.papers.schema import PaperMetadata, PaperResource
 from rag_reader.embedding import EmbeddingLoadError, EmbeddingModel
 from rag_reader.pipeline import RAGReader
 from rag_reader.splitter import DocumentSplitter

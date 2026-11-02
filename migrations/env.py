@@ -7,7 +7,7 @@ import os
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from literature_database.models import Base
+from app.papers.models import Base
 import app.storage.models  # noqa: F401 - register M2 tables
 
 config = context.config

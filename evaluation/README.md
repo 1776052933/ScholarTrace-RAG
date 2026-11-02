@@ -1,5 +1,11 @@
 # AutoPaper LitSearch 测评
 
+**当前版本 RAG 核心评测统一入口**见 [CURRENT.md](CURRENT.md)，支持 LitSearch、QASPER 和 ScholarQA-CS 数据适配。下文仍描述历史实时搜索评测。
+
+已有当前版本结果可通过 `python -m evaluation.score_current --run-dir ... --phase answer`
+在本地评分；LitSearch 使用 `--phase retrieve --cutoffs 1 5 10 20`（须已检索至少 20 条）。
+评分不调用模型 API。QASPER 官方评分与证据段落映射限制见 CURRENT.md。
+
 M0 固定基线评测（QASPER 全文问答与 LitSearch 固定语料检索）见 [M0.md](M0.md)。M1 同题对照见 [M1_COMPARISON.md](M1_COMPARISON.md)。
 
 该目录独立调用项目现有的 `AutoPaperWorkflow`，不修改查询理解、查询拆解、
@@ -187,3 +193,49 @@ python -m evaluation.run_scholargym --limit 5 --top-k 50 --cutoffs 20,50 --run-d
 文献源，并未使用 ScholarGym 的静态 57 万篇论文检索环境。因此它适合项目内部对比，
 结果应标注为“ScholarGym PaSa-RealScholar subset with live AutoPaper backends”，不能直接
 与 ScholarGym 论文表格或 PaSa 原论文中的数字横向比较。
+
+## QASPER 200 题诊断与独立新题验证
+
+本地 Qwen、DeepSeek 30 题对照、200 题提示词回归及新 60 题验证的实验设计、实测数据、局限和最终取舍见
+[`docs/QASPER_FOLLOWUP_RESULTS_20261022.md`](../docs/QASPER_FOLLOWUP_RESULTS_20261022.md)。
+后续 Top-K/相邻片段合并及回答支持性门控的成对实验见
+[`docs/QASPER_EVIDENCE_AND_SUPPORT_PHASE12_20261022.md`](../docs/QASPER_EVIDENCE_AND_SUPPORT_PHASE12_20261022.md)。
+逐题原始响应与冻结输入位于 `evaluation/runs/qasper_followup_20261022/`，原始基线仍在
+`evaluation/runs/qasper_qwen_dev200_20261021/`。这些运行目录是本机实验数据，未提交到 Git。
+
+在项目根目录运行下列命令可只读取已有结果、重新评分；它们不调用模型：
+
+```powershell
+python -m evaluation.qasper_followup score --model qwen
+python -m evaluation.qasper_followup score --model deepseek
+python -m evaluation.qasper_prompt_ablation score --cohort 200 --prompt v1
+python -m evaluation.qasper_prompt_ablation score --cohort 200 --prompt v3
+python -m evaluation.qasper_prompt_ablation score --cohort holdout60 --prompt v1
+python -m evaluation.qasper_prompt_ablation score --cohort holdout60 --prompt v3
+python -m evaluation.qasper_prompt_policy --cohort holdout60
+```
+
+## QASPER 新论文验证（第三、四阶段）
+
+证据选择、针对性提示词与 30 篇此前未入库论文、79 道问题的验证结果见
+[`docs/QASPER_PHASE34_RESULTS_20261022.md`](../docs/QASPER_PHASE34_RESULTS_20261022.md)。
+冻结的论文与问题 ID 在 [`evaluation/fixtures/qasper_new_papers_20261022.json`](fixtures/qasper_new_papers_20261022.json)；
+方案、验收条件及结果解释边界见
+[`docs/QASPER_PHASE34_PROTOCOL_20261022.md`](../docs/QASPER_PHASE34_PROTOCOL_20261022.md)。
+实验保留了完整逐题响应，但候选方案均未通过预设接入条件，因此当前产品问答默认行为未更改。
+
+在已有运行数据上重算新论文分数，使用项目已安装依赖的 Python：
+
+```powershell
+python -m evaluation.qasper_phase3_selection --cohort new_papers --include-model
+python -m evaluation.qasper_phase34_answers score --cohort new_papers --variant baseline5
+python -m evaluation.qasper_phase34_answers score --cohort new_papers --variant model_selected5
+python -m evaluation.qasper_phase34_answers score --cohort new_papers --variant numeric_guard5
+python -m evaluation.qasper_phase34_compare --cohort new_papers --candidate model_selected5
+python -m evaluation.qasper_phase34_compare --cohort new_papers --candidate numeric_guard5
+```
+
+评分只读保存的回答，不调用生成模型。索引、检索及生成的原始结果位于
+`evaluation/runs/qasper_new_papers_20261022/` 和
+`evaluation/runs/qasper_followup_20261022/phase3_model_selection/`、
+`evaluation/runs/qasper_followup_20261022/phase34_answers/`；这些目录是本机实验数据，不提交到 Git。

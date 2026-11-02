@@ -1,8 +1,8 @@
 """Regression test for download identifiers across search and ranking."""
 
-from ranking_agent.pipeline import _paper as ranking_paper
-from search_agent.schema import PaperMetadata
-from search_agent.searcher import deduplicate_papers, to_internal_paper
+from app.research.ranking.pipeline import _paper as ranking_paper
+from app.research.search.schema import PaperMetadata
+from app.research.search.searcher import deduplicate_papers, to_internal_paper
 
 
 def test_download_metadata_survives_deduplication_and_ranking():

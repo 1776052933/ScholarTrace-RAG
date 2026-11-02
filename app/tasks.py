@@ -7,7 +7,7 @@ from pathlib import Path
 from celery import Celery
 
 from app.services.ingestions import IngestionJobService
-from literature_database.database import DatabaseManager
+from app.papers.database import DatabaseManager
 from observability.tracing import flush_traces, trace_span
 
 

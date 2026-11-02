@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from literature_database.models import Base
+from app.papers.models import Base
 
 
 def utc_now() -> datetime:

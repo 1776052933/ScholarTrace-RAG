@@ -15,7 +15,7 @@ from sqlalchemy import or_, select, update
 from app.storage.models import (
     ConversationModel, ConversationTurnModel, MultiPaperAnswerModel, QuestionAnswerModel, utc_now,
 )
-from observability.tracing import flush_traces
+from observability.tracing import flush_traces, trace_span
 from rag_reader.errors import RAGGenerationError
 
 
@@ -170,27 +170,33 @@ class ConversationService:
             }}
             reader = self.questions.reader_for(turn.paper_ids)
             retrieval_question = turn.question
-            for event in reader.qa.stream(
-                turn.paper_ids, turn.question,
-                history=turn.history, paper_titles=turn.papers,
-                prompt_max_chars=turn.settings.prompt_max_chars,
-                max_tokens=turn.settings.max_output_tokens,
-            ):
-                if event["event"] == "status" and "retrieval_question" in event["data"]:
-                    retrieval_question = event["data"]["retrieval_question"]
-                if event["event"] == "status" and "prompt_chars" in event["data"]:
-                    turn.context["prompt_chars"] = event["data"]["prompt_chars"]
-                if event["event"] == "answer":
-                    answer = event["data"]
-                    self._complete(turn, retrieval_question, answer)
-                    completed = True
-                    yield {"event": "done", "data": {
-                        "conversation_id": turn.conversation_id, "turn_id": turn.turn_id,
-                        "answer_id": turn.turn_id, "answer": answer,
-                        "retrieval_question": retrieval_question, "context": turn.context,
-                    }}
-                    return
-                yield event
+            with trace_span("rag.conversation_turn", input={
+                "conversation_id": turn.conversation_id, "turn_id": turn.turn_id,
+                "paper_ids": turn.paper_ids,
+            }) as span:
+                for event in reader.qa.stream(
+                    turn.paper_ids, turn.question,
+                    history=turn.history, paper_titles=turn.papers,
+                    prompt_max_chars=turn.settings.prompt_max_chars,
+                    max_tokens=turn.settings.max_output_tokens,
+                ):
+                    if event["event"] == "status" and "retrieval_question" in event["data"]:
+                        retrieval_question = event["data"]["retrieval_question"]
+                    if event["event"] == "status" and "prompt_chars" in event["data"]:
+                        turn.context["prompt_chars"] = event["data"]["prompt_chars"]
+                    if event["event"] == "answer":
+                        answer = event["data"]
+                        self._complete(turn, retrieval_question, answer)
+                        span.update(output={"answer_id": turn.turn_id,
+                                            "source_count": len(answer.get("sources", []))})
+                        completed = True
+                        yield {"event": "done", "data": {
+                            "conversation_id": turn.conversation_id, "turn_id": turn.turn_id,
+                            "answer_id": turn.turn_id, "answer": answer,
+                            "retrieval_question": retrieval_question, "context": turn.context,
+                        }}
+                        return
+                    yield event
             raise RAGGenerationError("回答流未完整结束。")
         except GeneratorExit:
             if not completed:
