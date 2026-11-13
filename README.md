@@ -53,7 +53,7 @@ python -m pip install -r requirements-test.txt
 python -m pytest -q tests -m "not slow and not network"
 ```
 
-- [部署与固定 PDF 回归](docs/REPRODUCIBLE_DEPLOYMENT.md)
+- [部署与固定 PDF 回归](docs/REPRODUCIBLE_DEPLOYMENT.md) · [面试交付验收](docs/INTERVIEW_DELIVERY_ACCEPTANCE.md)
 - [当前评测入口](evaluation/CURRENT.md) · [数据集](docs/DATASETS.md)
 - [会话与流式输出](docs/CONVERSATIONS_AND_STREAMING.md) · [本地论文库](docs/LOCAL_PDF_LIBRARY.md)
 - [M0～M6 与历史验收索引](docs/HISTORY.md)
