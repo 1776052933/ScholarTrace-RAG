@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from ai_components.provider import DEFAULT_BASE_URL, DEFAULT_MODEL
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -21,13 +22,15 @@ class RAGSettings(BaseModel):
     vector_backend: Literal["chroma", "milvus"] = "chroma"
     milvus_uri: str = "http://127.0.0.1:19530"
     milvus_token: str | None = None
-    retrieval_mode: Literal["dense", "bm25", "hybrid"] = "dense"
+    retrieval_mode: Literal["dense", "bm25", "hybrid"] = "hybrid"
+    evidence_strategy: Literal["coverage", "balanced"] = "balanced"
     retrieval_candidate_k: int = Field(default=20, ge=1)
-    reranker_enabled: bool = False
+    reranker_enabled: bool = True
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    strict_support_enabled: bool = False
     pdf_parser_backend: Literal["pymupdf", "docling"] = "pymupdf"
-    llm_model: str = Field(default="deepseek-chat", min_length=1)
-    llm_base_url: str = Field(default="https://api.deepseek.com", min_length=1)
+    llm_model: str = Field(default=DEFAULT_MODEL, min_length=1)
+    llm_base_url: str = Field(default=DEFAULT_BASE_URL, min_length=1)
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
 
     @model_validator(mode="after")
@@ -50,6 +53,7 @@ class RAGSettings(BaseModel):
             "milvus_uri": "MILVUS_URI",
             "milvus_token": "MILVUS_TOKEN",
             "retrieval_mode": "RAG_RETRIEVAL_MODE",
+            "evidence_strategy": "RAG_EVIDENCE_STRATEGY",
             "retrieval_candidate_k": "RAG_CANDIDATE_K",
             "reranker_model": "RAG_RERANKER_MODEL",
             "pdf_parser_backend": "RAG_PDF_PARSER_BACKEND",
@@ -67,4 +71,7 @@ class RAGSettings(BaseModel):
         enabled = os.getenv("RAG_RERANKER_ENABLED")
         if enabled is not None:
             values["reranker_enabled"] = enabled.strip().lower() in {"1", "true", "yes", "on"}
+        strict = os.getenv("RAG_STRICT_SUPPORT_ENABLED")
+        if strict is not None:
+            values["strict_support_enabled"] = strict.strip().lower() in {"1", "true", "yes", "on"}
         return cls.model_validate(values)

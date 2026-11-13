@@ -38,7 +38,7 @@ class TextCleaner:
         records: List[dict[str, Any]] = []
         paragraph_count = 0
         for page in pages:
-            if page["metadata"].get("parser") == "docling":
+            if page["metadata"].get("parser") in {"docling", "structured"}:
                 value = _remove_garbled_characters(page["text"]).strip()
                 if value:
                     records.append({

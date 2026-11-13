@@ -1,7 +1,8 @@
 """Ranking Agent 使用的 DeepSeek OpenAI-compatible 客户端。"""
 
-import os
 from typing import Any, List, Mapping, Optional
+
+from ai_components.provider import assistant_content, chat_response, create_client, resolve_provider
 
 try:
     from openai import OpenAI
@@ -21,9 +22,8 @@ class DeepSeekClient:
         *,
         _client: Any = None,
     ) -> None:
-        self.api_key = (api_key or os.getenv("DEEPSEEK_API_KEY") or _project_key()).strip()
-        self.base_url = (base_url or os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").rstrip("/")
-        self.model = model or os.getenv("DEEPSEEK_MODEL") or "deepseek-chat"
+        config = resolve_provider(api_key, base_url, model, key_fallback=_project_key)
+        self.api_key, self.base_url, self.model = config.api_key, config.base_url, config.model
         self.timeout = float(timeout)
         if not self.api_key:
             raise ValueError("DeepSeek API key is missing")
@@ -32,13 +32,8 @@ class DeepSeekClient:
         if _client is not None:
             self._client = _client
         else:
-            if OpenAI is None:
-                raise ImportError("DeepSeekClient requires openai: pip install openai")
-            self._client = OpenAI(
-                api_key=self.api_key,
-                base_url=self.base_url,
-                timeout=self.timeout,
-            )
+            self._client = create_client(OpenAI, config, timeout=self.timeout,
+                                         missing_sdk="DeepSeekClient requires openai: pip install openai")
 
     def chat(
         self,
@@ -48,15 +43,10 @@ class DeepSeekClient:
         max_tokens: int = 1000,
     ) -> str:
         """调用 DeepSeek 并返回 assistant 文本。"""
-        response = self._client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=self.timeout,
-        )
+        response = chat_response(self._client, self.model, messages, self.timeout,
+                                 temperature=temperature, max_tokens=max_tokens)
         try:
-            content = response.choices[0].message.content
+            content = assistant_content(response)
         except (AttributeError, IndexError, TypeError) as exc:
             raise RuntimeError("DeepSeek returned an invalid response structure") from exc
         if not content:

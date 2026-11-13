@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .parser import PDFOpenError, PDFParserError, EmptyPDFTextError
+from .provenance import bibliography_entry
 
 
 class DoclingPDFParser:
@@ -46,14 +47,20 @@ class DoclingPDFParser:
             page = int(provenance[0].page_no)
             if page < 1:
                 continue
+            # A funding heading can precede continuation references in two-column PDFs.
+            # Classify each complete entry, never the entire remainder of the paper.
+            is_entry = label not in {"table", "section_header", "title"} and bibliography_entry(text)
             records.append({
                 "page": page,
-                "section": section,
+                "section": "References" if is_entry else section,
                 "text": text,
                 "metadata": {
                     "parser": "docling",
                     "item_type": label,
                     "source_ref": str(getattr(item, "self_ref", "") or ""),
+                    "source_section": section,
+                    "section_authoritative": True,
+                    "evidence_role": "bibliography" if is_entry else label,
                 },
             })
         if not records:

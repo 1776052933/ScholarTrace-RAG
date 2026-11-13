@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from .errors import RAGGenerationError
 from .prompt_adapter import build_messages
 from .schema import EvidenceCitation, RAGAnswer
+from .provenance import source_role
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,8 @@ class RAGAnswerParseError(RAGGenerationError, ValueError):
 
 
 def _parse_answer(content: str, question: str, chunks: Sequence[Any], *,
-                  evidence_sufficient: bool = True) -> RAGAnswer:
+                  evidence_sufficient: bool = True,
+                  reject_unknown_sources: bool = False) -> RAGAnswer:
     try:
         data = _extract_json(content)
         data["question"] = question
@@ -26,6 +28,9 @@ def _parse_answer(content: str, question: str, chunks: Sequence[Any], *,
         raw_sources = data.get("sources") or []
         if not isinstance(raw_sources, list):
             raise TypeError("sources must be a list")
+        if reject_unknown_sources and any(not isinstance(source, str) or source not in valid_sources
+                                          for source in raw_sources):
+            raise ValueError("answer cited a chunk outside the supplied evidence")
         sources = list(dict.fromkeys(
             str(source) for source in raw_sources if str(source) in valid_sources
         ))
@@ -83,7 +88,9 @@ def _fit_evidence(prompt, payload, history, chunks, max_chars):
     def render():
         payload["chunks"] = [
             {"chunk_id": c.chunk_id, "paper_id": c.paper_id, "page": c.page,
-             "section": c.section, "text": c.text} for c in used
+             "title": str(c.metadata.get("title") or ""),
+             "section": "References" if source_role(c.text, c.metadata) == "bibliography" else c.section,
+             "source_type": source_role(c.text, c.metadata), "text": c.text} for c in used
         ]
         return build_messages(prompt, payload, history=history)
 

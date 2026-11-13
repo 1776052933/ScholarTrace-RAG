@@ -8,7 +8,7 @@ import streamlit as st
 
 from api_client import (
     WorkflowRunError, create_conversation, export_answer, get_conversation,
-    recent_conversations, stream_conversation,
+    paper_page_preview, paper_pdf_url, recent_conversations, stream_conversation,
 )
 
 
@@ -18,6 +18,9 @@ def render_answer(answer, *, answer_id=None, key="answer"):
         st.caption(f"回答置信度：{answer['confidence']}")
     citations = [item for item in answer.get("citations") or [] if isinstance(item, dict)]
     if citations:
+        answer_key = answer_id or hashlib.sha256(
+            json.dumps(answer, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()[:16]
         with st.expander(f"证据片段（{len(citations)}）"):
             for index, citation in enumerate(citations, 1):
                 st.markdown(f"**{index}. {citation.get('title') or citation.get('paper_id') or '论文证据'}**")
@@ -27,6 +30,27 @@ def render_answer(answer, *, answer_id=None, key="answer"):
                 location.extend(str(citation.get(field) or "") for field in ("section", "chunk_id"))
                 st.caption(" · ".join(value for value in location if value))
                 st.write(str(citation.get("excerpt") or ""))
+                paper_id, page = citation.get("paper_id"), citation.get("page")
+                if paper_id and isinstance(page, int) and page >= 1:
+                    preview_key = f"pdf_preview_{key}_{answer_key}_{index}"
+                    if st.button(f"查看并高亮 PDF 第 {page} 页", key=preview_key):
+                        try:
+                            image, matches = paper_page_preview(
+                                str(paper_id), page, str(citation.get("excerpt") or "")
+                            )
+                            st.session_state["active_pdf_preview"] = {
+                                "key": preview_key, "image": image, "matches": matches,
+                            }
+                        except WorkflowRunError as exc:
+                            st.warning(str(exc))
+                    if st.session_state.get("active_pdf_preview", {}).get("key") == preview_key:
+                        preview = st.session_state["active_pdf_preview"]
+                        st.image(preview["image"], caption=f"原始 PDF 第 {page} 页")
+                        if preview["matches"]:
+                            st.caption("黄色标记是从本条引用中定位到的原文；请结合整页核对。")
+                        else:
+                            st.warning("已打开原始 PDF 页，但解析片段无法可靠地匹配页面文字，未添加高亮。")
+                    st.link_button("在原始 PDF 中打开本页", paper_pdf_url(str(paper_id), page))
     elif answer.get("sources"):
         with st.expander(f"证据片段（{len(answer['sources'])}）"):
             for source in answer["sources"]:
@@ -131,7 +155,8 @@ def render_conversation(paper_ids, *, key, question_label, submit_label):
             text = st.empty()
             accumulated = ""
             labels = {"rewriting": "正在结合历史理解追问…", "retrieving": "正在检索论文原文…",
-                      "generating": "正在生成回答…"}
+                      "generating": "正在生成回答…", "verifying": "正在核对回答与论文证据…",
+                      "abstained": "证据未通过核验，已拒答。"}
             for event in stream_conversation(conversation_id, question.strip()):
                 if event["event"] == "status":
                     progress.caption(labels.get(event["data"].get("stage"), "正在处理…"))

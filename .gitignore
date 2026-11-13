@@ -15,7 +15,7 @@ __pycache__/
 
 # Runtime data and generated artifacts
 data/
-papers/
+/papers/
 logs/
 output/
 tmp/

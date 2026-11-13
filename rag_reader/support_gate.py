@@ -22,6 +22,16 @@ _MISSING = re.compile(
     r"no (?:information|evidence|details?))\b",
     re.I,
 )
+_NUMBER = re.compile(r"(?<![\w.])[-+]?\d+(?:\.\d+)?%?(?!\w|\.\d)")
+
+
+def is_refusal(answer: str) -> bool:
+    """Recognize explicit uncertainty, without treating an ordinary 'No' as refusal."""
+    text = " ".join(answer.split()).strip()
+    return (text == "Unanswerable"
+            or text.startswith(("根据提供的论文片段无法确定", "根据当前引用片段无法确定",
+                                "根据提供的证据无法确定", "无法根据提供的论文片段确定"))
+            or normalize_refusal(text, []))
 
 
 def normalize_refusal(answer: str, sources: Sequence[str]) -> bool:
@@ -30,7 +40,8 @@ def normalize_refusal(answer: str, sources: Sequence[str]) -> bool:
     return not sources and bool(_REFUSAL.search(text) and _MISSING.search(text))
 
 
-def validate_verdict(verdict: Mapping[str, Any], cited_chunks: Mapping[str, str]) -> dict[str, Any]:
+def validate_verdict(verdict: Mapping[str, Any], cited_chunks: Mapping[str, str], *,
+                     require_all_sources: bool = False) -> dict[str, Any]:
     """Accept 'supported' only with a verbatim quote from a cited chunk."""
     decision = verdict.get("decision")
     if decision not in {"supported", "unsupported", "uncertain"}:
@@ -52,7 +63,35 @@ def validate_verdict(verdict: Mapping[str, Any], cited_chunks: Mapping[str, str]
         if len(clean_quote) < 8 or clean_quote not in clean_source:
             return {"supported": False, "reason": "quote_not_verbatim"}
         valid.append({"chunk_id": chunk_id, "quote": clean_quote})
+    if require_all_sources and {item["chunk_id"] for item in valid} != set(cited_chunks):
+        return {"supported": False, "reason": "missing_source_quote"}
     return {"supported": True, "reason": "quoted_support", "quotes": valid}
+
+
+def strict_gate(answer: str, sources: Sequence[str], chunks: Sequence[Mapping[str, str]], *,
+                paper_ids: Sequence[str], verdict: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Fail closed on missing evidence, unverifiable claims or verifier uncertainty."""
+    if is_refusal(answer):
+        return {"action": "abstain", "reason": "model_abstained"}
+    if not answer.strip():
+        return {"action": "abstain", "reason": "empty_answer"}
+    available = {chunk["chunk_id"]: chunk for chunk in chunks}
+    if not sources or any(source not in available for source in sources):
+        return {"action": "abstain", "reason": "missing_valid_citation"}
+    if len(paper_ids) > 1 and {available[source]["paper_id"] for source in sources} != set(paper_ids):
+        return {"action": "abstain", "reason": "missing_paper_citation"}
+    if verdict is None:
+        return {"action": "verify", "reason": "needs_verifier"}
+    checked = validate_verdict(verdict, {source: available[source]["text"] for source in sources},
+                               require_all_sources=True)
+    if not checked["supported"]:
+        return {"action": "abstain", "reason": checked["reason"]}
+    quoted_numbers = {match.group() for item in checked["quotes"]
+                      for match in _NUMBER.finditer(item["quote"])}
+    answer_numbers = {match.group() for match in _NUMBER.finditer(answer)}
+    if not answer_numbers.issubset(quoted_numbers):
+        return {"action": "abstain", "reason": "unquoted_number"}
+    return {"action": "answer", "reason": "verified_support"}
 
 
 def gate(answer: str, sources: Sequence[str], chunks: Sequence[Mapping[str, str]],

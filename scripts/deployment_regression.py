@@ -165,13 +165,72 @@ def stream_turn(client, cid, question):
     assert not any(e["event"] == "error" for e in events), events
     done = [e for e in events if e["event"] == "done"]
     delta = [e for e in events if e["event"] == "delta"]
-    assert len(done) == 1 and len(delta) > 1, "Expected incremental deltas followed by done"
+    # A valid short answer (for example "6") may arrive in a single delta.
+    assert len(done) == 1 and len(delta) >= 1, "Expected a delta followed by done"
     assert delta[0]["seconds"] < done[0]["seconds"], "No delta arrived before completion"
     assert "".join(e["data"]["text"] for e in delta) == done[0]["data"]["answer"]["answer"]
     return {"result": done[0]["data"], "events": events, "question": question}
 
 
+def ingest_uploads(client, report, path):
+    """Exercise the multipart upload and task polling used by Streamlit."""
+    fixtures = (
+        ("attention.pdf", "Attention Is All You Need"),
+        ("dexterous.pdf", "Dexterous Manipulation for Multi-Fingered Robotic Hands With Reinforcement Learning: A Review"),
+    )
+    uploads = report.setdefault("uploads", [])
+    for filename, title in fixtures[len(uploads):]:
+        pdf = path.parent / "fixtures" / filename
+        with pdf.open("rb") as stream:
+            uploaded = request(client, "POST", "/api/v1/papers/upload",
+                               files={"file": (filename, stream, "application/pdf")},
+                               data={"title": title})
+        uploads.append({**uploaded, "file": filename,
+                        "sha256": hashlib.sha256(pdf.read_bytes()).hexdigest()})
+        save(path, report)
+    for uploaded in uploads:
+        job_id = uploaded["ingestion_job_id"]
+        deadline = time.monotonic() + 1800
+        while job_id:
+            job = request(client, "GET", f"/api/v1/jobs/{job_id}")
+            if job["status"] == "completed":
+                uploaded["job"] = job
+                break
+            if job["status"] not in {"queued", "running"} or time.monotonic() >= deadline:
+                raise RuntimeError(f"PDF ingestion did not complete: {job}")
+            time.sleep(3)
+        response = client.get("/api/v1/pdf", params={"paper_id": uploaded["paper_id"]})
+        response.raise_for_status()
+        assert hashlib.sha256(response.content).hexdigest() == uploaded["sha256"]
+        save(path, report)
+        print(json.dumps({"uploaded": uploaded["file"], "job_status": "completed"}), flush=True)
+    report["paper_ids"] = [uploaded["paper_id"] for uploaded in uploads]
+    papers = request(client, "GET", "/api/v1/papers")
+    assert set(report["paper_ids"]) <= {p["paper_id"] for p in papers
+                                        if p["embedding_status"] == "COMPLETED" and p["has_pdf"]}
+
+
+def verify_pdf_previews(client, report):
+    checked = {}
+    for case in report["cases"]:
+        for citation in case["result"]["answer"]["citations"]:
+            paper_id = citation["paper_id"]
+            if paper_id in checked:
+                continue
+            response = client.post("/api/v1/pdf/preview", json={
+                "paper_id": paper_id, "page": citation["page"], "excerpt": citation["excerpt"],
+            })
+            response.raise_for_status()
+            assert response.headers["content-type"] == "image/png"
+            assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+            checked[paper_id] = {"page": citation["page"],
+                                 "highlight_count": int(response.headers["x-highlight-count"])}
+    assert set(checked) == set(report["paper_ids"])
+    report["pdf_previews"] = checked
+
+
 def model(client, report, path):
+    papers = report.get("paper_ids", PAPERS)
     assert report.get("ingest_status") == "passed", "Finish ingestion before calling the provider"
     if report.get("model_started"):
         revalidate_recorded_model(client, report)
@@ -191,16 +250,16 @@ def model(client, report, path):
         print(json.dumps({"case": name, "passed": True}), flush=True)
 
     single = request(client, "POST", "/api/v1/questions", json={
-        "paper_id": PAPERS[0],
+        "paper_id": papers[0],
         "question": "在表 2 中，Transformer (big) 的 EN-DE 和 EN-FR BLEU 分数分别是多少？请引用该表。",
     })
     def check_single():
-        validate_answer(client, single, PAPERS[:1])
+        validate_answer(client, single, papers[:1])
         assert all(value in single["answer"]["answer"] for value in ["28.4", "41.8"])
     record("single_table", {"result": single}, check_single)
 
     conv = request(client, "POST", "/api/v1/conversations",
-                   json={"paper_ids": PAPERS[:1], "title": "真实模型回归 · Transformer 多轮"})
+                   json={"paper_ids": papers[:1], "title": "真实模型回归 · Transformer 多轮"})
     report["conversation_id"] = conv["conversation_id"]
     save(path, report)
     for name, question in [
@@ -210,7 +269,7 @@ def model(client, report, path):
         streamed = stream_turn(client, conv["conversation_id"], question)
         def check_stream():
             result = streamed["result"]
-            validate_answer(client, result, PAPERS[:1])
+            validate_answer(client, result, papers[:1])
             assert re.search(r"\b6\b|六|six", result["answer"]["answer"], re.I)
             expected_history = 1 if name == "stream_followup" else 0
             assert result["context"]["history_turns"] == expected_history
@@ -218,32 +277,35 @@ def model(client, report, path):
         record(name, streamed, check_stream)
 
     multi = request(client, "POST", "/api/v1/questions/multi", json={
-        "paper_ids": PAPERS,
+        "paper_ids": papers,
         "question": "这两篇论文各自研究什么任务？对比机器翻译与机器人灵巧操作，分别引用每篇论文的证据。",
     })
     def check_multi():
-        validate_answer(client, multi, PAPERS)
-        assert {c["paper_id"] for c in multi["answer"]["citations"]} == set(PAPERS)
+        validate_answer(client, multi, papers)
+        assert {c["paper_id"] for c in multi["answer"]["citations"]} == set(papers)
         assert "翻译" in multi["answer"]["answer"]
         assert any(word in multi["answer"]["answer"] for word in ["操作", "抓取"])
     record("multi_paper", {"result": multi}, check_multi)
 
     abstain = request(client, "POST", "/api/v1/questions", json={
-        "paper_id": PAPERS[0], "question": "论文第一作者每天早上喝什么品牌的咖啡？只根据论文证据回答。",
+        "paper_id": papers[0], "question": "论文第一作者每天早上喝什么品牌的咖啡？只根据论文证据回答。",
     })
     def check_abstain():
-        validate_answer(client, abstain, PAPERS[:1], require_citations=False)
+        validate_answer(client, abstain, papers[:1], require_citations=False)
         assert any(word in abstain["answer"]["answer"] for word in ["无法", "未提供", "未提及", "没有提供", "不能确定"])
         assert abstain["answer"]["confidence"] <= 0.5
     record("insufficient_evidence", {"result": abstain}, check_abstain)
     snapshot = request(client, "GET", f"/api/v1/conversations/{conv['conversation_id']}")
     assert [t["status"] for t in snapshot["turns"]] == ["completed", "completed"]
     report["conversation_before_restart"] = snapshot
+    if "paper_ids" in report:
+        verify_pdf_previews(client, report)
     report["model_complete"] = True
 
 
 def revalidate_recorded_model(client, report):
     """Finish a fully recorded run without paying for the same answers again."""
+    papers = report.get("paper_ids", PAPERS)
     names = [case.get("name") for case in report.get("cases", [])]
     expected = ["single_table", "stream_first", "stream_followup",
                 "multi_paper", "insufficient_evidence"]
@@ -253,7 +315,7 @@ def revalidate_recorded_model(client, report):
     for name in expected:
         case = cases[name]
         result = case["result"]
-        validate_answer(client, result, PAPERS if name == "multi_paper" else PAPERS[:1],
+        validate_answer(client, result, papers if name == "multi_paper" else papers[:1],
                         require_citations=name != "insufficient_evidence")
         answer = result["answer"]["answer"]
         if name == "single_table":
@@ -263,12 +325,12 @@ def revalidate_recorded_model(client, report):
             events = case["events"]
             deltas = [event for event in events if event["event"] == "delta"]
             dones = [event for event in events if event["event"] == "done"]
-            assert len(deltas) > 1 and len(dones) == 1
+            assert len(deltas) >= 1 and len(dones) == 1
             assert deltas[0]["seconds"] < dones[0]["seconds"]
             assert "".join(event["data"]["text"] for event in deltas) == answer
             assert result["context"]["history_turns"] == (1 if name == "stream_followup" else 0)
         elif name == "multi_paper":
-            assert {citation["paper_id"] for citation in result["answer"]["citations"]} == set(PAPERS)
+            assert {citation["paper_id"] for citation in result["answer"]["citations"]} == set(papers)
             assert "翻译" in answer and any(word in answer for word in ["操作", "抓取"])
         else:
             assert any(word in answer for word in ["无法", "未提供", "未提及", "没有提供", "不能确定"])
@@ -277,24 +339,27 @@ def revalidate_recorded_model(client, report):
     snapshot = request(client, "GET", f"/api/v1/conversations/{report['conversation_id']}")
     assert [turn["status"] for turn in snapshot["turns"]] == ["completed", "completed"]
     report["conversation_before_restart"] = snapshot
+    if "paper_ids" in report:
+        verify_pdf_previews(client, report)
     report["model_complete"] = True
 
 
 def verify(client, report):
+    papers = report.get("paper_ids", PAPERS)
     assert report.get("model_complete"), "Complete model phase before restart verification"
     snapshot = request(client, "GET", f"/api/v1/conversations/{report['conversation_id']}")
     assert snapshot == report["conversation_before_restart"], "Conversation changed across restart"
     for case in report["cases"]:
         result = case["result"]
-        validate_answer(client, result, PAPERS, require_citations=case["name"] != "insufficient_evidence")
+        validate_answer(client, result, papers, require_citations=case["name"] != "insufficient_evidence")
     # Reopen the real vector store and embedding model after restart without LLM calls.
     from app.services.questions import QuestionService
     from app.papers.database import DatabaseManager
     database = DatabaseManager(os.environ["DATABASE_URL"])
     try:
-        reader = QuestionService(database, Path("/app/data/m2")).reader_for(PAPERS[:1])
-        chunks = reader.retriever.retrieve(PAPERS[0], "encoder decoder N = 6 layers", top_k=5)
-        assert chunks and all(c.paper_id == PAPERS[0] for c in chunks)
+        reader = QuestionService(database, Path("/app/data/m2")).reader_for(papers[:1])
+        chunks = reader.retriever.retrieve(papers[0], "encoder decoder N = 6 layers", top_k=5)
+        assert chunks and all(c.paper_id == papers[0] for c in chunks)
         report["restart"] = {"conversation_equal": True, "answers_and_exports_equal": True,
                              "retrieved_chunks": len(chunks), "pages": [c.page for c in chunks]}
     finally:
@@ -303,10 +368,10 @@ def verify(client, report):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--phase", choices=["ingest", "model", "verify"], required=True)
+    parser.add_argument("--phase", choices=["ingest", "upload", "model", "verify"], required=True)
     parser.add_argument("--api-url", default="http://api:8000")
     parser.add_argument("--output", type=Path, default=Path("/app/data/m2/deployment_regression.json"))
-    parser.add_argument("--real-model", action="store_true", help="Required opt-in for paid provider calls")
+    parser.add_argument("--real-model", action="store_true", help="Required opt-in for real model calls, including local models")
     args = parser.parse_args()
     if args.phase == "model" and not args.real_model:
         parser.error("model phase requires --real-model")
@@ -320,6 +385,9 @@ def main():
             request(client, "GET", "/api/v1/health")
             if args.phase == "ingest":
                 ingest(client, report)
+            elif args.phase == "upload":
+                ingest_uploads(client, report, args.output)
+                report["ingest_status"] = "passed"
             elif args.phase == "model":
                 model(client, report, args.output)
             else:

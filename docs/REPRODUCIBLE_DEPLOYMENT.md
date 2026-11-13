@@ -5,8 +5,10 @@
 ## 准备
 
 1. 启动 Docker Desktop。仓库根目录执行 `python -m scripts.init_deployment_env`，创建本地 `.env`。脚本只生成本地数据库密码，不覆盖现有文件。如果 `.env` 已经存在，保留原有密钥并补齐 `MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD`，再运行 `docker compose --env-file .env config --quiet` 验证。
-2. 在 `.env` 中填写 `DEEPSEEK_API_KEY`。如已下载 BGE-M3，把完整模型目录放入 `SCHOLARTRACE_MODELS_DIR`，并把 `RAG_EMBEDDING_MODEL` 设为容器路径，例如 `/app/models/bge_m3_model`。Docling 缓存目录由 `SCHOLARTRACE_MODEL_CACHE` 指定；没有缓存时设 `HF_HUB_OFFLINE=0`，首次入库会下载模型。有缓存且希望完全离线解析时设 `HF_HUB_OFFLINE=1`。
+2. 在 `.env` 中填写 `DEEPSEEK_API_KEY`。如已下载 BGE-M3 和 BGE reranker，把两个完整模型目录放入 `SCHOLARTRACE_MODELS_DIR`，并把 `RAG_EMBEDDING_MODEL`、`RAG_RERANKER_MODEL` 分别设为容器路径，例如 `/app/models/bge_m3_model`、`/app/models/reranker_windows_model`。默认混合检索与重排需要 Milvus 及重排模型；使用 `HF_HUB_OFFLINE=1` 时必须确认容器内两个模型路径都存在。Docling 缓存目录由 `SCHOLARTRACE_MODEL_CACHE` 指定；没有缓存时设 `HF_HUB_OFFLINE=0`，首次入库会下载模型。有缓存且希望完全离线解析时设 `HF_HUB_OFFLINE=1`。
 3. 如果默认端口已被占用，在 `.env` 中调整 `SCHOLARTRACE_API_PORT`、`SCHOLARTRACE_UI_PORT`、`SCHOLARTRACE_MCP_PORT`、`SCHOLARTRACE_MILVUS_PORT`。不要把 `.env`、模型、PDF 或运行报告提交 Git。
+
+Compose 通过 `DATABASE_URL` 使用 MySQL，并设置 `SCHOLARTRACE_DATABASE_BACKEND=mysql` 作启动检查。无 Compose 的本机运行统一回退到 `AUTO_PAPER_DATA_ROOT/app.sqlite3`；界面侧栏和 API `/api/v1/health` 显示实际数据库后端及库名。旧根目录 `literature.db` 不会被自动迁移或删除。
 
 ## 启动与停止
 

@@ -1,252 +1,62 @@
-# RAG Reader
+# RAG Reader：当前实现说明
 
-`rag_reader` 是 Auto_paper 的独立论文深度理解模块。它接收
-`app.papers` 提供的 `PaperResource`，将论文全文转换为可检索的向量索引，
-并提供结构化知识抽取、基于证据的论文问答和论文摘要能力。
+本页描述当前代码中的 `rag_reader/`，与项目根目录的 [README](../README.md) 配合阅读。M0/M1 等历史验收文档保留当时的架构和结果，不作为当前运行配置。
 
-模块不提供 Web 或 FastAPI 接口，其他 Agent 可以直接调用 `RAGReader`。
+## 职责与边界
 
-## 1. 模块作用
+`RAGReader`（`pipeline.py`）组合 PDF 解析、清洗、分块、Embedding、向量库、检索、问答、摘要和知识抽取。它不是 HTTP 服务：`app/api/` 暴露接口，`app/services/` 管理业务状态，`app/tasks.py` 运行后台入库；界面通过 FastAPI 访问这些能力。论文资源对象来自 `app/papers/`。
 
-主要功能包括：
+五个领域模型客户端共享 `ai_components/provider.py` 的配置与调用层；查询理解、拆解、搜索、排序和 RAG 各自保留输出 JSON 解析及面向该环节的异常契约。生成链由 `ai_components/chains.py` 提供。
 
-- 加载 PDF、TXT 和 Markdown 论文资源；
-- 使用 PyMuPDF 提取 PDF 页面文本；
-- 清理页眉页脚、乱码、重复内容和异常断行；
-- 将论文切分为适合检索的 `DocumentChunk`；
-- 使用 BGE-M3 生成中英文文本向量；
-- 将文本、Embedding 和元数据写入 Chroma；
-- 根据问题检索相关论文片段；
-- 使用 DeepSeek 抽取 `PaperKnowledge`；
-- 基于检索证据回答论文问题；
-- 生成背景、方法、实验、结果、局限和结论摘要。
+## 当前主运行路径
 
-## 2. 数据流
+1. 用户搜索论文或上传本地 PDF，API 在 MySQL 记录论文、任务和会话。Celery 从 Redis 接收任务 ID，负责后台下载和入库。
+2. `RAGReader.prepare_paper()` 读取 PDF，使用 Docling 或 PyMuPDF 提取页面文本，清洗后按页和章节用 LangChain `RecursiveCharacterTextSplitter` 分块，保留论文 ID、页码等元数据。
+3. `ingest_prepared()` 用 BGE-M3 生成向量并写入向量库。Compose 主运行采用 Milvus；重新摄取同一论文会替换其旧片段，并校验索引签名。Chroma 是显式可选的轻量后端。
+4. 问答使用 `PaperQA` 和 `AnswerGraph`：追问先结合近期历史改写，再由 `EvidenceGraph` 检索证据；生成、解析引用和校验走同一张 LangGraph。多篇论文可并行取证。针对询问论文本身任务或贡献的问题，检索器会先排除标题和书目条目；若旧索引的正文候选不足，会在同一论文内补检一次。引用类问题仍可检索参考文献。模型调用由共享 LangChain 生成链适配 OpenAI 兼容接口，支持 DeepSeek 或配置的本地兼容模型。
+5. 应用层将有效对话轮次写入 MySQL，FastAPI 通过 SSE 传输增量回答，Streamlit 显示引用并可打开原始 PDF 页。生成失败或断流的轮次不写入有效历史。
 
-论文摄取流程：
+`AnswerGraph` 本身不持久化检查点；持久状态由应用层管理。`RAGReader.get_document()` 和 `get_chunks()` 保存的是当前进程内副本，进程重启后的论文目录、任务与会话状态来自数据库，检索索引来自向量库。
+
+## 检索默认值与覆盖
+
+Compose 的运行默认值是 **Milvus 混合检索（dense + BM25）+ RRF 合并 + BAAI/bge-reranker-v2-m3 重排**，先取候选再返回 Top-K。主要环境变量：
 
 ```text
-Literature Database / PaperResource
-                 ↓
-          DocumentLoader
-                 ↓
-       PDFParser（PDF 文件）
-                 ↓
-            TextCleaner
-                 ↓
-         DocumentSplitter
-                 ↓
-       BGE-M3 EmbeddingModel
-                 ↓
-          Chroma VectorStore
+RAG_VECTOR_BACKEND=milvus
+RAG_COLLECTION_NAME=paper_chunks_m3
+RAG_RETRIEVAL_MODE=hybrid
+RAG_CANDIDATE_K=20
+RAG_RERANKER_ENABLED=true
+RAG_RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+RAG_PDF_PARSER_BACKEND=docling
 ```
 
-论文问答流程：
+实际部署值可在 `.env` 覆盖；`.env.example` 和 `compose.yaml` 给出默认配置。`RAGSettings` 的检索模式和重排开关也分别默认为 `hybrid`、`true`。直接在代码中无环境变量构造 `RAGReader()` 时，向量库仍默认 Chroma；Chroma 只支持 dense，`pipeline.py` 会自动使用 dense 检索，重排仍可启用。需要混合检索时必须选择 Milvus，并在入库和问答两端使用同一索引配置。
 
-```text
-paper_id + question
-         ↓
-   PaperRetriever
-         ↓
-   Top-K 相关 Chunk
-         ↓
-      DeepSeek
-         ↓
-RAGAnswer（回答、来源 Chunk、置信度）
-```
+配置 `RAG_RERANKER_ENABLED=false` 可做无重排消融；`RAG_RETRIEVAL_MODE=dense` 或 `bm25` 可做检索消融。默认的严格支持性二次模型核验仍关闭，因现有对照实验发现过度拒答；问答继续走引用解析和已有答案约束。
 
-论文总结流程：
+## 关键文件
 
-```text
-已摄取的 PaperDocument
-           ↓
-       DeepSeek
-           ↓
-背景 / 方法 / 实验 / 结果 / 局限 / 结论
-```
+| 文件 | 当前作用 |
+| --- | --- |
+| `config.py`、`store_factory.py` | 参数读取、Chroma/Milvus 选择与索引范围 |
+| `parser.py`、`docling_parser.py`、`cleaner.py`、`splitter.py` | PDF 解析、清洗、保留页码与分块 |
+| `embedding.py`、`vector_store.py`、`milvus_store.py` | BGE-M3、Chroma、Milvus 向量索引 |
+| `retriever.py`、`reranker.py`、`evidence_graph.py` | 召回、BGE 重排、多论文证据补检 |
+| `provenance.py`、`answer_contracts.py` | 区分正文、标题、表格和参考文献；将论文标题与证据类型传给回答模型 |
+| `qa.py`、`answer_graph.py`、`prompts.py` | 问题改写、证据问答、流式生成与引用校验 |
+| `extractor.py`、`summarizer.py` | 可调用的知识抽取和结构化摘要 |
+| `examples.py` | 显式使用 Chroma 的单文件演示，不是 Compose 主运行入口 |
 
-重新摄取相同 `paper_id` 时，`RAGReader` 会替换该论文原有的 Chroma Chunk，避免旧索引残留。
+## 运行与测试
 
-## 3. 依赖
-
-核心依赖：
-
-```text
-pydantic
-openai
-pymupdf
-sentence-transformers
-chromadb
-langchain-core
-langchain-text-splitters
-```
-
-可以使用以下命令安装：
-
-```bash
-pip install pydantic openai pymupdf sentence-transformers chromadb langchain-core
-langchain-text-splitters
-```
-
-各依赖用途：
-
-- `pydantic`：文档、Chunk、知识和问答结果校验；
-- `openai`：通过 OpenAI 兼容接口调用 DeepSeek；
-- `pymupdf`：PDF 文本提取；
-- `sentence-transformers`：加载 `BAAI/bge-m3` 并生成向量；
-- `chromadb`：向量存储和相似度检索；
-- `langchain-core`：统一构造问答、摘要和知识抽取提示词；
-- `langchain-text-splitters`：递归文本切片。
-
-首次使用 BGE-M3 时，`sentence-transformers` 会下载模型文件，需要可用的模型下载环境和足够的磁盘空间。
-
-## 4. DeepSeek 配置
-
-模块使用 DeepSeek 的 OpenAI 兼容接口，不会在代码中写死 API Key。
-
-PowerShell：
+在项目根目录按 [可复现部署说明](../docs/REPRODUCIBLE_DEPLOYMENT.md) 配置服务。离线测试入口统一为：
 
 ```powershell
-$env:DEEPSEEK_API_KEY="your-api-key"
-$env:DEEPSEEK_BASE_URL="https://api.deepseek.com"
-$env:DEEPSEEK_MODEL="deepseek-chat"
+python -m pytest -q tests -m "not slow and not network"
 ```
 
-Linux 或 macOS：
+检索与回答的真实效果以 [评测目录](../evaluation/README.md) 中固定数据集和运行报告为准；接口与数据流可用 `tests/` 下的无密钥测试检查。
 
-```bash
-export DEEPSEEK_API_KEY="your-api-key"
-export DEEPSEEK_BASE_URL="https://api.deepseek.com"
-export DEEPSEEK_MODEL="deepseek-chat"
-```
-
-其中：
-
-- `DEEPSEEK_API_KEY`：必需；
-- `DEEPSEEK_BASE_URL`：可选，默认 `https://api.deepseek.com`；
-- `DEEPSEEK_MODEL`：可选，默认 `deepseek-chat`。
-
-如果项目的 `API_key/key_manager.py` 已配置 `deepseek`，客户端也会尝试通过
-`key_get("deepseek")` 读取密钥。推荐优先使用环境变量，便于部署和密钥轮换。
-
-## 5. 向量数据库配置
-
-`VectorStore` 使用 Chroma。默认构造方式创建进程内 Chroma 客户端：
-
-```python
-from rag_reader.pipeline import RAGReader
-
-reader = RAGReader()
-```
-
-如需在程序重启后保留向量数据，应配置持久化目录：
-
-```python
-from rag_reader.pipeline import RAGReader
-from rag_reader.vector_store import VectorStore
-
-vector_store = VectorStore(
-    collection_name="paper_chunks_m1",
-    persist_directory="./data/chroma",
-)
-
-reader = RAGReader(vector_store=vector_store)
-```
-
-每条向量记录包含：
-
-- Chunk Embedding；
-- Chunk 原文；
-- `paper_id`；
-- 页码（可获得时）；
-- 章节；
-- Chunk 扩展元数据。
-
-## 6. 调用示例
-
-以下示例导入一篇本地 PDF，然后执行问答和摘要：
-
-```python
-import json
-
-from app.papers.schema import (
-    PaperAvailability,
-    PaperMetadata,
-    PaperResource,
-)
-from rag_reader.pipeline import RAGReader
-from rag_reader.vector_store import VectorStore
-
-
-resource = PaperResource(
-    paper=PaperMetadata(
-        paper_id="paper-001",
-        title="Swin UNETR: Swin Transformers for Semantic Segmentation",
-    ),
-    availability=PaperAvailability.FULL_AVAILABLE,
-    file_path="./papers/swin_unetr.pdf",
-)
-
-reader = RAGReader(
-    vector_store=VectorStore(
-        collection_name="paper_chunks_m1",
-        persist_directory="./data/chroma",
-    )
-)
-
-# 1. 导入论文、切片、生成向量并建立索引
-chunks = reader.ingest_paper(resource)
-print(f"已写入 {len(chunks)} 个 Chunk")
-
-# 2. 基于论文片段问答
-answer = reader.ask(
-    "paper-001",
-    "该论文提出的方法是什么？",
-)
-print(answer.model_dump_json(indent=2))
-
-# 3. 生成结构化摘要
-summary = reader.summarize("paper-001")
-print(json.dumps(summary, ensure_ascii=False, indent=2))
-```
-
-`reader.ask()` 返回 `RAGAnswer`：
-
-```json
-{
-  "question": "该论文提出的方法是什么？",
-  "answer": "论文提出……",
-  "sources": ["paper-001-chunk-00003"],
-  "confidence": 0.92
-}
-```
-
-`reader.summarize()` 返回：
-
-```json
-{
-  "background": "",
-  "method": "",
-  "experiment": "",
-  "result": "",
-  "limitation": "",
-  "conclusion": ""
-}
-```
-
-如需运行完整命令行示例：
-
-```bash
-python -m rag_reader.examples ./papers/paper.pdf --title "论文标题"
-```
-
-该示例会依次完成 PDF 导入、Chroma 建库、知识抽取、摘要生成和论文问答，并输出回答所引用的来源 Chunk。
-
-
-## M1 的页码、配置与索引保护
-
-PDF 入库现在逐页清洗与切块；即使提供了 `text_path`，只要 `file_path` 是 PDF，仍优先读取 PDF 以保留页码。TXT/Markdown 没有真实 PDF 页，`page` 为 `null`。问答结果保留兼容字段 `sources`，并增加 `citations`：每条含 `paper_id`、`chunk_id`、标题、页码、章节、原文和检索分数。仅有引用不等于该引用一定支持答案，仍需评测。
-
-`RAGSettings` 集中配置 embedding、切块、Top-K、集合名和 DeepSeek 参数；可用 `RAG_CHUNK_SIZE`、`RAG_CHUNK_OVERLAP`、`RAG_TOP_K`、`RAG_EMBEDDING_MODEL`、`DEEPSEEK_MODEL` 等环境变量覆盖。纯检索无需 DeepSeek 密钥；真正调用模型时才读取密钥。
-
-BGE-M3 加载失败会报错，不再静默使用哈希向量。新 Chroma 集合名是 `paper_chunks_m1`，会记录 embedding 模型修订和维度；旧 `paper_chunks` 索引不会自动混入。升级旧数据时请重新摄取论文到新集合。同一集合遇到不同模型或无版本旧向量会返回 `index_incompatible` 错误。
+QASPER 的新评测索引直接使用数据集提供的章节名；重新解析 PDF 时会为书目条目写入 `References` 和来源类型。已有 Milvus 索引不会自动重写，查询时会尽量按旧片段的章节与文本补判来源；要让持久化元数据也更新，需重新入库对应论文。固定 30 题和真实 PDF 对照记录见 [来源与证据修复报告](../docs/SOURCE_PROVENANCE_REGRESSION_20261107.md)。

@@ -77,7 +77,9 @@ class DocumentSplitter:
             if not text:
                 continue
             section = str(segment.get("section") or current_section).strip()
-            for block_section, block_text in _section_blocks(text, section):
+            authoritative = (segment.get('metadata') or {}).get('section_authoritative', False)
+            blocks = [(section, text)] if authoritative else _section_blocks(text, section)
+            for block_section, block_text in blocks:
                 if block_section:
                     current_section = block_section
                 for chunk_text in splitter.split_text(block_text):
@@ -89,6 +91,7 @@ class DocumentSplitter:
                     metadata.update({
                         "chunk_index": chunk_index,
                         "character_count": len(chunk_text),
+                        "provenance_version": 2,
                     })
                     if title:
                         metadata["title"] = title
@@ -166,9 +169,13 @@ def _is_section_heading(line: str) -> bool:
     if re.match(r"^\d+(?:\.\d+)*[.)]?\s+[A-Z\u4e00-\u9fff]", line):
         return True
     normalized = line.casefold().strip(":：")
+    if " ::: " in normalized:
+        return _is_section_heading(normalized.split(" ::: ", 1)[0])
     return normalized in {
         "abstract", "introduction", "related work", "background", "method",
         "methods", "methodology", "experiments", "experiment", "results",
-        "discussion", "conclusion", "limitations", "future work",
+        "discussion", "conclusion", "conclusions", "limitations", "future work",
+        "references", "bibliography", "dataset", "dataset description",
+        "data augmentation", "proposed methodology", "conclusion - future work",
         "摘要", "引言", "相关工作", "方法", "实验", "结果", "讨论", "结论", "局限性",
     }

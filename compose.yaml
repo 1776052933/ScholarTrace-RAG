@@ -95,13 +95,14 @@ services:
     <<: *application
     environment: &runtime_environment
       DATABASE_URL: mysql+pymysql://${MYSQL_USER:-scholartrace}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-scholartrace}?charset=utf8mb4
+      SCHOLARTRACE_DATABASE_BACKEND: mysql
       AUTO_PAPER_DATA_ROOT: /app/data/m2
       RAG_VECTOR_BACKEND: milvus
       RAG_COLLECTION_NAME: ${RAG_COLLECTION_NAME:-paper_chunks_m3}
       MILVUS_URI: http://milvus:19530
-      RAG_RETRIEVAL_MODE: ${RAG_RETRIEVAL_MODE:-dense}
+      RAG_RETRIEVAL_MODE: ${RAG_RETRIEVAL_MODE:-hybrid}
       RAG_CANDIDATE_K: ${RAG_CANDIDATE_K:-20}
-      RAG_RERANKER_ENABLED: ${RAG_RERANKER_ENABLED:-false}
+      RAG_RERANKER_ENABLED: ${RAG_RERANKER_ENABLED:-true}
       RAG_PDF_PARSER_BACKEND: ${RAG_PDF_PARSER_BACKEND:-docling}
       RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-BAAI/bge-m3}
       RAG_EMBEDDING_DEVICE: cpu
@@ -125,6 +126,8 @@ services:
       LANGSMITH_WORKSPACE_ID: ${LANGSMITH_WORKSPACE_ID:-}
       SEARCH_GRAPH_MAX_SECONDS: ${SEARCH_GRAPH_MAX_SECONDS:-300}
       RAG_EVIDENCE_MAX_EXPANSIONS: ${RAG_EVIDENCE_MAX_EXPANSIONS:-1}
+      RAG_EVIDENCE_STRATEGY: ${RAG_EVIDENCE_STRATEGY:-balanced}
+      RAG_STRICT_SUPPORT_ENABLED: ${RAG_STRICT_SUPPORT_ENABLED:-false}
       CHAT_HISTORY_MAX_TURNS: ${CHAT_HISTORY_MAX_TURNS:-6}
       CHAT_HISTORY_MAX_CHARS: ${CHAT_HISTORY_MAX_CHARS:-6000}
       CHAT_PROMPT_MAX_CHARS: ${CHAT_PROMPT_MAX_CHARS:-24000}
@@ -177,6 +180,7 @@ services:
     <<: *application
     environment:
       DATABASE_URL: mysql+pymysql://${MYSQL_USER:-scholartrace}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-scholartrace}?charset=utf8mb4
+      SCHOLARTRACE_DATABASE_BACKEND: mysql
       AUTO_PAPER_DATA_ROOT: /app/data/m2
       CELERY_BROKER_URL: redis://redis:6379/0
     depends_on:
@@ -189,6 +193,8 @@ services:
     <<: *application
     environment:
       AUTO_PAPER_API_URL: http://api:8000
+      SCHOLARTRACE_API_PORT: ${SCHOLARTRACE_API_PORT:-8000}
+      AUTO_PAPER_PUBLIC_API_URL: ${AUTO_PAPER_PUBLIC_API_URL:-}
     ports:
       - "127.0.0.1:${SCHOLARTRACE_UI_PORT:-8501}:8501"
     depends_on:

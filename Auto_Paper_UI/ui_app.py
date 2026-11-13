@@ -1,8 +1,7 @@
-"""Streamlit user interface for the AutoPaper research workflow."""
+"""Streamlit user interface for ScholarTrace RAG."""
 
 from __future__ import annotations
 
-import math
 import os
 from datetime import datetime
 from pathlib import Path
@@ -46,7 +45,7 @@ from conversation_panel import render_answer, render_conversation
 
 
 st.set_page_config(
-    page_title="AutoPaper Studio",
+    page_title="ScholarTrace RAG",
     page_icon=":material/science:",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -175,8 +174,8 @@ def render_header() -> None:
     st.markdown(
         """
         <div class="ap-brand">
-          <div class="ap-mark">A</div>
-          <div class="ap-title">AutoPaper Studio</div>
+          <div class="ap-mark">S</div>
+          <div class="ap-title">ScholarTrace RAG</div>
         </div>
         <div class="ap-subtitle">科研论文检索、精排与证据问答工作台</div>
         """,
@@ -215,7 +214,7 @@ def render_controls() -> tuple[RunOptions, bool]:
     extract_knowledge = st.sidebar.toggle("抽取结构化知识", value=True, disabled=not enable_rag)
 
     with st.sidebar.expander("高级设置"):
-        use_query_llm = st.toggle("使用 DeepSeek 理解查询", value=True)
+        use_query_llm = st.toggle("使用模型理解查询", value=True)
         enable_citation_tracking = st.toggle("启用引文追踪", value=True)
         publication_year = st.number_input(
             "论文发表截止年份（可选）",
@@ -257,8 +256,11 @@ def render_controls() -> tuple[RunOptions, bool]:
         status = api_status()
         st.session_state["api_connected"] = status["connected"]
         st.write("研究 API：" + ("已连接" if status["connected"] else "未连接"))
-        st.write("MySQL/数据库：" + ("可用" if status["database"] else "不可用"))
-        for label, key in (("DeepSeek", "deepseek"), ("SerpAPI", "serpapi"), ("OpenAlex", "openalex")):
+        backend = status.get("database_backend") or "未标明"
+        name = status.get("database_name")
+        detail = f"{backend} · {name}" if name else backend
+        st.write(f"数据库（{detail}）：" + ("可用" if status["database"] else "不可用"))
+        for label, key in (("模型服务", "deepseek"), ("SerpAPI", "serpapi"), ("OpenAlex", "openalex")):
             st.write(f"{label}：" + ("服务端已配置" if status[key] else "服务端未配置"))
         if not status["connected"]:
             st.warning("请先启动研究 API，再提交任务。")
@@ -469,17 +471,14 @@ def render_result(
     if literature_result.get("download_enabled") is False:
         render_candidate_selection(result)
 
-    paper_tab, graph_tab, reader_tab, overview_tab, export_tab = st.tabs([
+    paper_tab, reader_tab, overview_tab, export_tab = st.tabs([
         "Top 论文",
-        "论文关系图",
         "智能阅读",
         "运行概览",
         "导出报告",
     ])
     with paper_tab:
         render_papers(papers)
-    with graph_tab:
-        render_relationship_graph(result)
     with reader_tab:
         render_reader(
             papers,
@@ -521,533 +520,6 @@ def render_papers(papers: list[dict[str, Any]]) -> None:
             st.write(paper.get("abstract") or "暂无摘要。")
             if paper.get("url"):
                 st.link_button("查看论文", str(paper["url"]))
-
-
-def _build_sphere_mesh(
-    spheres: list[dict[str, Any]],
-    radius: float,
-    *,
-    latitude_steps: int = 5,
-    longitude_steps: int = 8,
-) -> dict[str, list[Any]]:
-    mesh: dict[str, list[Any]] = {
-        "x": [], "y": [], "z": [],
-        "i": [], "j": [], "k": [],
-        "intensity": [], "customdata": [],
-    }
-
-    def add_vertex(
-        x: float,
-        y: float,
-        z: float,
-        intensity: float,
-        customdata: Any,
-    ) -> int:
-        index = len(mesh["x"])
-        mesh["x"].append(x)
-        mesh["y"].append(y)
-        mesh["z"].append(z)
-        mesh["intensity"].append(intensity)
-        mesh["customdata"].append(customdata)
-        return index
-
-    for sphere in spheres:
-        center_x = float(sphere.get("x") or 0.0)
-        center_y = float(sphere.get("y") or 0.0)
-        center_z = float(sphere.get("z") or 0.0)
-        sphere_radius = float(sphere.get("radius") or radius)
-        intensity = float(sphere.get("intensity") or 0.0)
-        customdata = sphere.get("customdata")
-        top = add_vertex(
-            center_x,
-            center_y,
-            center_z + sphere_radius,
-            intensity,
-            customdata,
-        )
-        rings: list[list[int]] = []
-        for latitude in range(1, latitude_steps):
-            theta = math.pi * latitude / latitude_steps
-            ring: list[int] = []
-            for longitude in range(longitude_steps):
-                phi = 2 * math.pi * longitude / longitude_steps
-                ring.append(add_vertex(
-                    center_x + sphere_radius * math.sin(theta) * math.cos(phi),
-                    center_y + sphere_radius * math.sin(theta) * math.sin(phi),
-                    center_z + sphere_radius * math.cos(theta),
-                    intensity,
-                    customdata,
-                ))
-            rings.append(ring)
-        bottom = add_vertex(
-            center_x,
-            center_y,
-            center_z - sphere_radius,
-            intensity,
-            customdata,
-        )
-
-        for longitude in range(longitude_steps):
-            following = (longitude + 1) % longitude_steps
-            mesh["i"].append(top)
-            mesh["j"].append(rings[0][longitude])
-            mesh["k"].append(rings[0][following])
-        for ring_index in range(len(rings) - 1):
-            upper = rings[ring_index]
-            lower = rings[ring_index + 1]
-            for longitude in range(longitude_steps):
-                following = (longitude + 1) % longitude_steps
-                mesh["i"].extend([upper[longitude], upper[following]])
-                mesh["j"].extend([lower[longitude], lower[longitude]])
-                mesh["k"].extend([upper[following], lower[following]])
-        for longitude in range(longitude_steps):
-            following = (longitude + 1) % longitude_steps
-            mesh["i"].append(bottom)
-            mesh["j"].append(rings[-1][following])
-            mesh["k"].append(rings[-1][longitude])
-    return mesh
-
-
-def render_relationship_graph(result: dict[str, Any]) -> None:
-    ranking = (
-        result.get("stages", {})
-        .get("ranking_agent", {})
-        .get("result", {})
-    )
-    points = [
-        point for point in ranking.get("graph_points", []) or []
-        if isinstance(point, dict)
-    ]
-    edges = _relationship_edges(
-        points,
-        ranking.get("graph_edges", []) or [],
-    )
-    if not points:
-        st.info("本次结果没有可展示的论文关系数据，请重新运行检索。")
-        return
-    try:
-        import plotly.graph_objects as go
-    except ImportError:
-        st.info("论文关系图依赖 Plotly，请安装 UI 依赖后重新启动。")
-        return
-
-    view_mode = st.segmented_control(
-        "关系图视图",
-        options=["三维关系图", "二维层级图"],
-        default="三维关系图",
-        label_visibility="collapsed",
-        key="relationship_graph_view",
-    )
-    if view_mode == "二维层级图":
-        _render_2d_relationship_graph(result, ranking, points, edges, go)
-        _render_graph_metrics(ranking, points)
-        return
-
-    coordinate_values: list[float] = []
-    for point in points:
-        for axis in ("x", "y", "z"):
-            try:
-                coordinate_values.append(abs(float(point.get(axis, 0.0))))
-            except (TypeError, ValueError):
-                pass
-    axis_extent = max(1.0, max(coordinate_values, default=1.0) * 1.2)
-    shaft_end = axis_extent * 0.94
-
-    figure = go.Figure()
-    point_by_id = {
-        str(point.get("paper_id") or ""): point
-        for point in points
-        if point.get("paper_id")
-    }
-    edge_x: list[Any] = []
-    edge_y: list[Any] = []
-    edge_z: list[Any] = []
-    for edge in edges:
-        target = point_by_id.get(str(edge.get("target_id") or ""))
-        if target is None:
-            continue
-        source = point_by_id.get(str(edge.get("source_id") or ""))
-        start = (
-            float(source.get("x") or 0.0),
-            float(source.get("y") or 0.0),
-            float(source.get("z") or 0.0),
-        ) if source else (0.0, 0.0, 0.0)
-        edge_x.extend([start[0], float(target.get("x") or 0.0), None])
-        edge_y.extend([start[1], float(target.get("y") or 0.0), None])
-        edge_z.extend([start[2], float(target.get("z") or 0.0), None])
-    if edge_x:
-        figure.add_trace(go.Scatter3d(
-            name="论文发现关系",
-            mode="lines",
-            x=edge_x,
-            y=edge_y,
-            z=edge_z,
-            line={"color": "#9aa3aa", "width": 2},
-            opacity=0.42,
-            hoverinfo="skip",
-            showlegend=False,
-        ))
-    for axis, coordinates in (
-        ("X", ([-axis_extent, shaft_end], [0, 0], [0, 0])),
-        ("Y", ([0, 0], [-axis_extent, shaft_end], [0, 0])),
-        ("Z", ([0, 0], [0, 0], [-axis_extent, shaft_end])),
-    ):
-        figure.add_trace(go.Scatter3d(
-            name=f"{axis} 轴",
-            mode="lines",
-            x=coordinates[0],
-            y=coordinates[1],
-            z=coordinates[2],
-            line={"color": "#1f2529", "width": 4},
-            hoverinfo="skip",
-            showlegend=False,
-        ))
-    figure.add_trace(go.Cone(
-        name="坐标轴正方向",
-        x=[axis_extent, 0.0, 0.0],
-        y=[0.0, axis_extent, 0.0],
-        z=[0.0, 0.0, axis_extent],
-        u=[1.0, 0.0, 0.0],
-        v=[0.0, 1.0, 0.0],
-        w=[0.0, 0.0, 1.0],
-        anchor="tip",
-        sizemode="absolute",
-        sizeref=axis_extent * 0.03,
-        colorscale=[[0.0, "#1f2529"], [1.0, "#1f2529"]],
-        showscale=False,
-        hoverinfo="skip",
-        showlegend=False,
-    ))
-    first_ranked = [
-        point for point in points
-        if str(point.get("rank") or "").strip() in {"1", "1.0"}
-    ]
-    paper_scores = [float(point.get("final_score") or 0.0) for point in points]
-    minimum_score = min(paper_scores, default=0.0)
-    maximum_score = max(paper_scores, default=1.0)
-    score_span = maximum_score - minimum_score
-
-    def visual_strength(point: dict[str, Any]) -> float:
-        score = float(point.get("final_score") or 0.0)
-        if score_span <= 1e-9:
-            return min(max(score, 0.0), 1.0)
-        return min(max((score - minimum_score) / score_span, 0.0), 1.0)
-
-    groups = (
-        (
-            "排名第一",
-            first_ranked,
-            [[0.0, "#ffb45c"], [1.0, "#d94f00"]],
-        ),
-        (
-            "高度相关",
-            [
-                point for point in points
-                if point not in first_ranked
-                and point.get("relevance_level") == "highly_relevant"
-            ],
-            [[0.0, "#f3b7ad"], [1.0, "#a61f1f"]],
-        ),
-        (
-            "部分相关",
-            [
-                point for point in points
-                if point not in first_ranked
-                and point.get("relevance_level") != "highly_relevant"
-            ],
-            [[0.0, "#b9d7f2"], [1.0, "#19558c"]],
-        ),
-    )
-    sphere_lighting = {
-        "ambient": 0.5,
-        "diffuse": 0.8,
-        "specular": 0.45,
-        "roughness": 0.35,
-        "fresnel": 0.15,
-    }
-    light_position = {"x": 100, "y": 150, "z": 200}
-    for label, group, colorscale in groups:
-        if not group:
-            continue
-        paper_mesh = _build_sphere_mesh(
-            [
-                {
-                    "x": point.get("x", 0.0),
-                    "y": point.get("y", 0.0),
-                    "z": point.get("z", 0.0),
-                    "radius": axis_extent * (
-                        0.015 + 0.008 * visual_strength(point)
-                    ),
-                    "intensity": visual_strength(point),
-                    "customdata": [
-                        point.get("title") or "未命名论文",
-                        point.get("rank") or "-",
-                        float(point.get("final_score") or 0.0),
-                        "是" if point.get("llm_evaluated") else "否",
-                    ],
-                }
-                for point in group
-            ],
-            axis_extent * 0.01,
-        )
-        figure.add_trace(go.Mesh3d(
-            name=label,
-            x=paper_mesh["x"],
-            y=paper_mesh["y"],
-            z=paper_mesh["z"],
-            i=paper_mesh["i"],
-            j=paper_mesh["j"],
-            k=paper_mesh["k"],
-            intensity=paper_mesh["intensity"],
-            intensitymode="vertex",
-            colorscale=colorscale,
-            cmin=0.0,
-            cmax=1.0,
-            showscale=False,
-            opacity=1.0,
-            flatshading=False,
-            lighting=sphere_lighting,
-            lightposition=light_position,
-            customdata=paper_mesh["customdata"],
-            hovertemplate=(
-                "<b>%{customdata[0]}</b><br>"
-                "精排第 %{customdata[1]} 名<br>"
-                "综合得分 %{customdata[2]:.3f}<br>"
-                "DeepSeek 评价：%{customdata[3]}<extra></extra>"
-            ),
-            showlegend=True,
-        ))
-    target_mesh = _build_sphere_mesh(
-        [{
-            "x": 0.0,
-            "y": 0.0,
-            "z": 0.0,
-            "intensity": 1.0,
-            "customdata": result.get("query") or "研究目标",
-        }],
-        axis_extent * 0.016,
-        latitude_steps=7,
-        longitude_steps=12,
-    )
-    figure.add_trace(go.Mesh3d(
-        name="研究目标",
-        x=target_mesh["x"],
-        y=target_mesh["y"],
-        z=target_mesh["z"],
-        i=target_mesh["i"],
-        j=target_mesh["j"],
-        k=target_mesh["k"],
-        color="#f2c14e",
-        opacity=1.0,
-        flatshading=False,
-        lighting=sphere_lighting,
-        lightposition=light_position,
-        customdata=target_mesh["customdata"],
-        hovertemplate="<b>研究目标</b><br>%{customdata}<extra></extra>",
-        showlegend=True,
-    ))
-    figure.update_layout(
-        height=650,
-        margin={"l": 0, "r": 0, "t": 18, "b": 0},
-        paper_bgcolor="#ffffff",
-        plot_bgcolor="#ffffff",
-        legend={"orientation": "h", "y": 1.02, "x": 0.0},
-        scene={
-            "bgcolor": "#ffffff",
-            "aspectmode": "cube",
-            "xaxis": {
-                "visible": False,
-                "range": [-axis_extent, axis_extent],
-                "showspikes": False,
-            },
-            "yaxis": {
-                "visible": False,
-                "range": [-axis_extent, axis_extent],
-                "showspikes": False,
-            },
-            "zaxis": {
-                "visible": False,
-                "range": [-axis_extent, axis_extent],
-                "showspikes": False,
-            },
-            "camera": {"eye": {"x": 1.45, "y": 1.45, "z": 1.1}},
-        },
-    )
-    st.plotly_chart(
-        figure,
-        use_container_width=True,
-        config={"displaylogo": False, "scrollZoom": True},
-    )
-
-    _render_graph_metrics(ranking, points)
-
-
-def _relationship_edges(
-    points: list[dict[str, Any]],
-    raw_edges: Any,
-) -> list[dict[str, Any]]:
-    """Provide root links for results created before graph edges were persisted."""
-    edges = [edge for edge in raw_edges or [] if isinstance(edge, dict)]
-    if edges:
-        return edges
-    return [
-        {
-            "source_id": "__research_target__",
-            "target_id": str(point.get("paper_id") or ""),
-            "direction": "search",
-            "depth": 0,
-        }
-        for point in points
-        if str(point.get("paper_id") or "").strip()
-    ]
-
-
-def _render_2d_relationship_graph(
-    result: dict[str, Any],
-    ranking: dict[str, Any],
-    points: list[dict[str, Any]],
-    edges: list[dict[str, Any]],
-    go: Any,
-) -> None:
-    layers: dict[int, list[dict[str, Any]]] = {0: [], 1: [], 2: []}
-    for point in points:
-        depth = min(2, max(0, int(point.get("citation_depth") or 0)))
-        layers[depth].append(point)
-    positions: dict[str, tuple[float, float]] = {
-        "__research_target__": (0.0, 0.0),
-    }
-    for depth, layer in layers.items():
-        layer.sort(key=lambda point: int(point.get("rank") or 10**9))
-        count = len(layer)
-        spacing = max(0.16, min(0.72, 12.0 / max(count, 1)))
-        for index, point in enumerate(layer):
-            positions[str(point.get("paper_id") or "")] = (
-                (index - (count - 1) / 2.0) * spacing,
-                float(-(depth + 1)),
-            )
-
-    figure = go.Figure()
-    line_x: list[Any] = []
-    line_y: list[Any] = []
-    for edge in edges:
-        source = positions.get(str(edge.get("source_id") or ""))
-        target = positions.get(str(edge.get("target_id") or ""))
-        if source is None or target is None:
-            continue
-        line_x.extend([source[0], target[0], None])
-        line_y.extend([source[1], target[1], None])
-    if line_x:
-        figure.add_trace(go.Scatter(
-            mode="lines",
-            x=line_x,
-            y=line_y,
-            line={"color": "#a7afb5", "width": 1.2},
-            opacity=0.55,
-            hoverinfo="skip",
-            showlegend=False,
-        ))
-
-    scores = [float(point.get("final_score") or 0.0) for point in points]
-    minimum = min(scores, default=0.0)
-    span = max(max(scores, default=1.0) - minimum, 1e-9)
-    groups = (
-        ("排名第一", lambda point: int(point.get("rank") or 0) == 1, "#e86f00"),
-        (
-            "高度相关",
-            lambda point: int(point.get("rank") or 0) != 1
-            and point.get("relevance_level") == "highly_relevant",
-            "#bd3f3f",
-        ),
-        (
-            "部分相关",
-            lambda point: int(point.get("rank") or 0) != 1
-            and point.get("relevance_level") != "highly_relevant",
-            "#4f86b5",
-        ),
-    )
-    for label, predicate, color in groups:
-        group = [point for point in points if predicate(point)]
-        if not group:
-            continue
-        figure.add_trace(go.Scatter(
-            name=label,
-            mode="markers",
-            x=[positions[str(point.get("paper_id") or "")][0] for point in group],
-            y=[positions[str(point.get("paper_id") or "")][1] for point in group],
-            marker={
-                "size": [
-                    10 + 8 * ((float(point.get("final_score") or 0.0) - minimum) / span)
-                    for point in group
-                ],
-                "color": color,
-                "line": {"color": "#ffffff", "width": 1},
-                "opacity": 0.92,
-            },
-            customdata=[[
-                point.get("title") or "未命名论文",
-                point.get("rank") or "-",
-                float(point.get("final_score") or 0.0),
-                int(point.get("citation_depth") or 0),
-            ] for point in group],
-            hovertemplate=(
-                "<b>%{customdata[0]}</b><br>"
-                "精排第 %{customdata[1]} 名<br>"
-                "综合得分 %{customdata[2]:.3f}<br>"
-                "发现层级 %{customdata[3]}<extra></extra>"
-            ),
-        ))
-    figure.add_trace(go.Scatter(
-        name="研究目标",
-        mode="markers",
-        x=[0.0],
-        y=[0.0],
-        marker={
-            "size": 18,
-            "color": "#f2c14e",
-            "line": {"color": "#9a7112", "width": 1},
-        },
-        customdata=[result.get("query") or "研究目标"],
-        hovertemplate="<b>研究目标</b><br>%{customdata}<extra></extra>",
-    ))
-    layer_labels = {
-        0.0: "研究目标",
-        -1.0: "初始检索",
-        -2.0: "第一层引文追踪",
-        -3.0: "第二层引文追踪",
-    }
-    figure.update_layout(
-        height=680,
-        margin={"l": 120, "r": 20, "t": 28, "b": 20},
-        paper_bgcolor="#ffffff",
-        plot_bgcolor="#ffffff",
-        legend={"orientation": "h", "y": 1.04, "x": 0.0},
-        xaxis={"visible": False, "fixedrange": False},
-        yaxis={
-            "tickmode": "array",
-            "tickvals": list(layer_labels),
-            "ticktext": list(layer_labels.values()),
-            "range": [-3.45, 0.35],
-            "gridcolor": "#edf0f2",
-            "zeroline": False,
-            "fixedrange": False,
-        },
-        hovermode="closest",
-    )
-    st.plotly_chart(
-        figure,
-        use_container_width=True,
-        config={"displaylogo": False, "scrollZoom": True},
-    )
-
-
-def _render_graph_metrics(
-    ranking: dict[str, Any],
-    points: list[dict[str, Any]],
-) -> None:
-    first, second, third = st.columns(3)
-    first.metric("图中论文", f"{len(points)} 篇")
-    second.metric("高度相关", f"{int(ranking.get('highly_relevant_count') or 0)} 篇")
-    third.metric("DeepSeek 评价", f"{int(ranking.get('llm_evaluated_count') or 0)} 篇")
 
 
 def _relevance_label(value: Any) -> str:
@@ -1289,14 +761,14 @@ def render_exports(result: dict[str, Any], logs: Any = None) -> None:
     col1.download_button(
         "下载 Top 论文 Markdown 报告",
         data=markdown.encode("utf-8"),
-        file_name="autopaper_top_papers_report.md",
+        file_name="scholartrace_top_papers_report.md",
         mime="text/markdown",
         use_container_width=True,
     )
     col2.download_button(
         "下载完整精排论文 CSV",
         data=papers_csv_bytes(all_papers),
-        file_name="autopaper_ranked_papers.csv",
+        file_name="scholartrace_ranked_papers.csv",
         mime="text/csv",
         use_container_width=True,
     )

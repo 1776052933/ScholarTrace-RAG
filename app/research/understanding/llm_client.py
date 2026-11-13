@@ -2,6 +2,7 @@
 
 import json
 from ai_components.chains import generate_text
+from ai_components.provider import DEFAULT_BASE_URL, DEFAULT_MODEL, assistant_content, chat_response, create_client, resolve_provider
 import os
 from typing import Any, Dict, List, Mapping, Optional, Protocol
 
@@ -20,8 +21,6 @@ except ImportError:  # 保证离线查询理解在未安装 SDK 时仍可导入�
         pass
 
 
-DEFAULT_BASE_URL = "https://api.deepseek.com"
-DEFAULT_MODEL = "deepseek-chat"
 DEFAULT_TIMEOUT_SECONDS = 30.0
 
 
@@ -64,9 +63,13 @@ class DeepSeekClient:
         *,
         _client: Any = None,
     ) -> None:
-        self.api_key = api_key or _read_setting("DEEPSEEK_API_KEY", "deepseek")
-        self.base_url = base_url or _read_setting("DEEPSEEK_BASE_URL", "deepseek_base_url") or DEFAULT_BASE_URL
-        self.model = model or _read_setting("DEEPSEEK_MODEL", "deepseek_model") or DEFAULT_MODEL
+        config = resolve_provider(
+            api_key, base_url, model,
+            key_fallback=lambda: _read_setting("DEEPSEEK_API_KEY", "deepseek"),
+            url_fallback=lambda: _read_setting("DEEPSEEK_BASE_URL", "deepseek_base_url"),
+            model_fallback=lambda: _read_setting("DEEPSEEK_MODEL", "deepseek_model"),
+        )
+        self.api_key, self.base_url, self.model = config.api_key, config.base_url, config.model
         self.timeout_seconds = timeout_seconds
 
         if not self.api_key:
@@ -79,13 +82,8 @@ class DeepSeekClient:
         if _client is not None:
             self._client = _client
         else:
-            if OpenAI is None:
-                raise ImportError("The 'openai' package is required: pip install openai")
-            self._client = OpenAI(
-                api_key=self.api_key,
-                base_url=self.base_url.rstrip("/"),
-                timeout=self.timeout_seconds,
-            )
+            self._client = create_client(OpenAI, config, timeout=self.timeout_seconds,
+                                         missing_sdk="The 'openai' package is required: pip install openai")
 
     def chat(self, messages: List[Mapping[str, Any]]) -> str:
         """发送对话消息并返回助手文本。"""
@@ -96,12 +94,8 @@ class DeepSeekClient:
                 raise ValueError("each message must contain role and content")
 
         try:
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                timeout=self.timeout_seconds,
-            )
-            content = response.choices[0].message.content
+            response = chat_response(self._client, self.model, messages, self.timeout_seconds)
+            content = assistant_content(response)
             if content is None:
                 raise DeepSeekAPIError("DeepSeek returned an empty message")
             return str(content)

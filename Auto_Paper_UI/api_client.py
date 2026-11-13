@@ -59,12 +59,15 @@ def _request(method: str, path: str, *, payload: dict[str, Any] | None = None, t
         raise WorkflowRunError(f"无法连接研究 API：{exc}") from exc
 
 
-def api_status() -> dict[str, bool]:
+def api_status() -> dict[str, Any]:
     try:
         status = _request("GET", "/api/v1/health", timeout=2.0)
     except WorkflowRunError:
-        return {"connected": False, "database": False, "deepseek": False, "serpapi": False, "openalex": False}
-    return {name: bool(status.get(name)) for name in ("connected", "database", "deepseek", "serpapi", "openalex")}
+        return {"connected": False, "database": False, "database_backend": "", "database_name": "", "deepseek": False, "serpapi": False, "openalex": False}
+    result = {name: bool(status.get(name)) for name in ("connected", "database", "deepseek", "serpapi", "openalex")}
+    result["database_backend"] = str(status.get("database_backend") or "")
+    result["database_name"] = str(status.get("database_name") or "")
+    return result
 
 
 def start_workflow(options: RunOptions) -> str:
@@ -130,11 +133,37 @@ def upload_pdf(filename: str, data: bytes, title: str, collection_id: str | None
 def paper_pdf(paper_id: str) -> bytes:
     try:
         with httpx.Client(base_url=_base_url(), timeout=30.0) as client:
-            response = client.get(f"/api/v1/papers/{paper_id}/pdf")
+            response = client.get("/api/v1/pdf", params={"paper_id": paper_id})
             response.raise_for_status()
             return response.content
     except httpx.HTTPError as exc:
         raise WorkflowRunError(f"无法获取 PDF：{exc}") from exc
+
+
+def paper_pdf_url(paper_id: str, page: int) -> str:
+    public = os.getenv("AUTO_PAPER_PUBLIC_API_URL", "").rstrip("/")
+    if not public:
+        internal = _base_url()
+        public = (f"http://127.0.0.1:{os.getenv('SCHOLARTRACE_API_PORT', '8000')}"
+                  if internal.startswith("http://api:") else internal)
+    return f"{public}/api/v1/pdf?{urlencode({'paper_id': paper_id})}#page={page}"
+
+
+def paper_page_preview(paper_id: str, page: int, excerpt: str) -> tuple[bytes, int]:
+    try:
+        with httpx.Client(base_url=_base_url(), timeout=35.0) as client:
+            response = client.post("/api/v1/pdf/preview",
+                                   json={"paper_id": paper_id, "page": page, "excerpt": excerpt})
+            response.raise_for_status()
+            return response.content, int(response.headers.get("X-Highlight-Count", "0"))
+    except httpx.HTTPStatusError as exc:
+        try:
+            detail = exc.response.json().get("detail")
+        except (ValueError, AttributeError):
+            detail = None
+        raise WorkflowRunError(str(detail or f"PDF 预览返回 HTTP {exc.response.status_code}")) from exc
+    except (httpx.RequestError, ValueError) as exc:
+        raise WorkflowRunError(f"无法加载 PDF 原文页：{exc}") from exc
 
 
 def reindex_paper(paper_id: str) -> dict[str, Any]:

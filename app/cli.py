@@ -58,7 +58,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(content)
         return 0
     except Exception as exc:
-        logger.exception("Auto_paper 工作流失败")
+        logger.exception("ScholarTrace RAG 工作流失败")
         error = {
             "status": "failed",
             "query": query,
@@ -73,7 +73,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 def _parse_args(argv: Optional[Sequence[str]]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Auto_paper 端到端科研论文搜索、下载、精排与 RAG 工作流",
+        description="ScholarTrace RAG 科研论文搜索、下载、精排与证据问答工作流",
     )
     parser.add_argument("query", nargs="+", help="自然语言科研查询")
     parser.add_argument("--max-papers", type=int, default=5, help="最多下载和摄取的论文数")

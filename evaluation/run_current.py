@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from dataclasses import asdict
 from contextlib import contextmanager
 import hashlib
 import json
@@ -26,6 +27,7 @@ def parser():
     p.add_argument("--split", choices=["train", "dev", "test"], default="test")
     p.add_argument("--limit", type=int, default=0, help="0 selects all questions")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--case-ids-file", type=Path, help="QASPER JSON list of frozen question IDs")
     p.add_argument("--corpus-limit", type=int, default=0)
     p.add_argument("--corpus-jsonl", type=Path)
     p.add_argument("--corpus-provenance", default="")
@@ -110,7 +112,8 @@ def execute(args, *, runtime_factory=None):
             raise ValueError("answer requires --allow-model-calls and positive --max-answers")
     dataset = load_dataset(args.dataset, args.data_root, split=args.split, limit=args.limit,
                            seed=args.seed, corpus_limit=args.corpus_limit,
-                           corpus=args.corpus_jsonl, provenance=args.corpus_provenance)
+                           corpus=args.corpus_jsonl, provenance=args.corpus_provenance,
+                           case_ids_file=getattr(args, "case_ids_file", None))
     if not dataset.cases or len({c.case_id for c in dataset.cases}) != len(dataset.cases):
         raise ValueError("Questions must be non-empty and have unique IDs")
     settings = settings_for(args)
@@ -184,7 +187,7 @@ def execute(args, *, runtime_factory=None):
                         raise ValueError("Duplicate source paper_id")
                     seen.add(source.paper_id)
                     digest = hashlib.sha256(json.dumps(
-                        source.__dict__, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+                        asdict(source), sort_keys=True, ensure_ascii=False).encode()).hexdigest()
                     if source.paper_id in indexed:
                         if indexed[source.paper_id][0] != digest:
                             raise ValueError("Source content changed")

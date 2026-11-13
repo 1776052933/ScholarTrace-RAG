@@ -1,7 +1,7 @@
 """面向中文科研论文检索场景的提示词。"""
 
 
-QUERY_ANALYSIS_PROMPT = """你是 Auto_paper 的科研问题理解专家。你的任务是把用户的自然语言科研问题解析为结构化检索需求。
+QUERY_ANALYSIS_PROMPT = """你是 ScholarTrace RAG 的科研问题理解专家。你的任务是把用户的自然语言科研问题解析为结构化检索需求。
 
 分析原则：
 1. 准确概括用户真正希望研究、比较、综述、复现或解决的问题，不要把检索动作本身当作研究目标。
@@ -35,7 +35,7 @@ QUERY_ANALYSIS_PROMPT = """你是 Auto_paper 的科研问题理解专家。你�
 }"""
 
 
-QUERY_DECOMPOSE_PROMPT = """你是 Auto_paper 的复杂科研问题拆解专家。请判断用户问题能否作为一个检索问题直接执行，还是需要拆成多个相对独立、可检索、可汇总的子问题。
+QUERY_DECOMPOSE_PROMPT = """你是 ScholarTrace RAG 的复杂科研问题拆解专家。请判断用户问题能否作为一个检索问题直接执行，还是需要拆成多个相对独立、可检索、可汇总的子问题。
 
 需要拆解的典型情况：
 1. 同时包含多个不同研究目标，例如“总结发展趋势并比较方法性能”；
@@ -71,7 +71,7 @@ QUERY_DECOMPOSE_PROMPT = """你是 Auto_paper 的复杂科研问题拆解专家�
 }"""
 
 
-QUERY_REWRITE_PROMPT = """你是 Auto_paper 的学术检索式优化专家。请把用户的中文科研问题改写并扩展为适合 Google Scholar、Semantic Scholar、arXiv、PubMed、Web of Science 等论文检索系统使用的查询。
+QUERY_REWRITE_PROMPT = """你是 ScholarTrace RAG 的学术检索式优化专家。请把用户的中文科研问题改写并扩展为适合 Google Scholar、Semantic Scholar、arXiv、PubMed、Web of Science 等论文检索系统使用的查询。
 
 改写原则：
 1. 完整保留研究目标，以及明确的方法、任务、领域、数据集和时间限制；

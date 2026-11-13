@@ -8,11 +8,30 @@ from typing import Callable, Iterator
 
 
 @dataclass(frozen=True)
+class SourceSection:
+    name: str
+    text: str
+
+
+@dataclass(frozen=True)
 class Source:
     paper_id: str
     title: str
     text: str
     representation: str = "full_text"
+    sections: tuple[SourceSection, ...] = ()
+
+
+def qasper_source(paper_id: str, paper: dict) -> Source:
+    """Carry source section boundaries directly; never inspect QA annotations."""
+    sections = [SourceSection('Title', paper['title'])]
+    if paper.get('abstract'):
+        sections.append(SourceSection('Abstract', paper['abstract']))
+    sections.extend(SourceSection(str(s.get('section_name') or ''),
+                                  '\n\n'.join(s.get('paragraphs') or []))
+                    for s in paper.get('full_text', []) if s.get('paragraphs'))
+    return Source(paper_id, paper['title'], '\n\n'.join(s.text for s in sections),
+                  sections=tuple(sections))
 
 
 @dataclass(frozen=True)
@@ -41,7 +60,8 @@ def jsonl(path: Path):
 
 
 def load_dataset(name: str, root: Path, *, split="test", limit=0, seed=42,
-                 corpus_limit=0, corpus: Path | None = None, provenance="") -> Dataset:
+                 corpus_limit=0, corpus: Path | None = None, provenance="",
+                 case_ids_file: Path | None = None) -> Dataset:
     if limit < 0 or corpus_limit < 0:
         raise ValueError("limits must be non-negative; zero means all")
     if name != "qasper" and split != "test":
@@ -50,20 +70,33 @@ def load_dataset(name: str, root: Path, *, split="test", limit=0, seed=42,
         raise ValueError("--corpus-jsonl and --corpus-provenance apply only to ScholarQA-CS")
     if name != "litsearch" and corpus_limit:
         raise ValueError("--corpus-limit is only supported for LitSearch")
+    if case_ids_file is not None and (name != "qasper" or limit):
+        raise ValueError("--case-ids-file requires QASPER and replaces --limit")
     if name == "qasper":
-        from .run_m0_qasper import paper_text, select_questions
+        from .run_m0_qasper import select_questions
         path = root / "qasper" / f"qasper-{split}-v0.3.json"
         data = json.loads(path.read_text(encoding="utf-8"))
-        selected = select_questions(data, limit, seed)
+        if case_ids_file is None:
+            selected = select_questions(data, limit, seed)
+        else:
+            ids = json.loads(case_ids_file.read_text(encoding="utf-8"))
+            if (not isinstance(ids, list) or not ids
+                    or any(not isinstance(qid, str) or not qid for qid in ids)
+                    or len(set(ids)) != len(ids)):
+                raise ValueError("Expected a non-empty JSON list of unique question IDs")
+            available = {q["question_id"]: (p, q) for p, q in select_questions(data, 0, seed)}
+            if set(ids) - available.keys():
+                raise ValueError("Case IDs are absent from the selected QASPER split")
+            selected = [available[qid] for qid in ids]
         ids = sorted({paper_id for paper_id, _ in selected})
         cases = [Case(q["question_id"], q["question"], (p,)) for p, q in selected]
 
         def sources():
             for paper_id in ids:
                 paper = data[paper_id]
-                yield Source(paper_id, paper["title"], paper_text(paper))
+                yield qasper_source(paper_id, paper)
 
-        return Dataset(name, cases, sources, [path],
+        return Dataset(name, cases, sources, [path, *([case_ids_file] if case_ids_file else [])],
                        {q["question_id"]: q.get("answers", []) for _, q in selected},
                        {"split": split, "seed": seed, "limit": limit,
                         "source": "structured_full_text", "papers": len(ids),

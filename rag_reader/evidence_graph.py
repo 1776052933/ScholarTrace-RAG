@@ -82,6 +82,16 @@ class EvidenceGraph:
         retriever = ScopedPaperRetriever(backend=self.retriever, paper_ids=tuple(ids), top_k=top_k)
         return [to_chunk(document) for document in retriever.invoke(question)]
 
+    def _retrieve_each(self, ids: list[str], question: str, top_k: int) -> dict[str, list[DocumentChunk]]:
+        batch = getattr(self.retriever, "retrieve_per_paper", None)
+        if callable(batch):
+            found = batch(ids, question, top_k=top_k, max_workers=3)
+            if set(found) != set(ids) or any(chunk.paper_id != paper_id
+                                              for paper_id in ids for chunk in found[paper_id]):
+                raise ValueError("per-paper retrieval returned an invalid paper scope")
+            return found
+        return {paper_id: self._retrieve_chunks([paper_id], question, top_k) for paper_id in ids}
+
     def _retrieve(self, state: EvidenceState) -> dict[str, Any]:
         ids = state["paper_ids"]
         if self.strategy == "balanced" and len(ids) > 1:
@@ -90,8 +100,9 @@ class EvidenceGraph:
             per_paper = min(3, self.max_chunks // len(ids))
             chunks = []
             seen = set()
+            per_paper_chunks = self._retrieve_each(ids, state["question"], per_paper)
             for paper_id in ids:
-                for chunk in self._retrieve_chunks([paper_id], state["question"], per_paper):
+                for chunk in per_paper_chunks[paper_id]:
                     if chunk.chunk_id not in seen:
                         chunks.append(chunk)
                         seen.add(chunk.chunk_id)
@@ -117,9 +128,10 @@ class EvidenceGraph:
         chunks = [DocumentChunk.model_validate(item) for item in state["chunks"]]
         seen = {chunk.chunk_id for chunk in chunks}
         limit = min(8, max(2, state["top_k"] + 2 * (state["rounds"] + 1)))
+        per_paper_chunks = self._retrieve_each(state["missing_ids"], state["question"], limit)
         for paper_id in state["missing_ids"]:
             needed = 2 - sum(chunk.paper_id == paper_id for chunk in chunks)
-            for chunk in self._retrieve_chunks([paper_id], state["question"], limit):
+            for chunk in per_paper_chunks[paper_id]:
                 if chunk.chunk_id not in seen:
                     chunks.append(chunk)
                     seen.add(chunk.chunk_id)

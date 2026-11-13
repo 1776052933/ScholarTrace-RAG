@@ -1,4 +1,4 @@
-"""Presentation helpers and export formats for AutoPaper UI results."""
+"""Presentation helpers and export formats for ScholarTrace RAG."""
 
 from __future__ import annotations
 
@@ -187,7 +187,7 @@ def markdown_report(result: dict[str, Any]) -> str:
         if isinstance(item, dict) and item.get("success") is False
     ]
     lines = [
-        "# AutoPaper 科研分析报告",
+        "# ScholarTrace RAG 科研分析报告",
         "",
         f"- 研究主题：{result.get('query', '')}",
         f"- 运行状态：{status}",

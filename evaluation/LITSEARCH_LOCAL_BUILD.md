@@ -76,6 +76,6 @@ docker start scholartrace-litsearch-index-v2-20261021
 
 ## 本次评分代码验证
 
-`test_current_scoring.py test_current_evaluation.py test_langchain_architecture.py`：
+`tests/test_current_scoring.py tests/test_current_evaluation.py tests/test_langchain_architecture.py`：
 31 passed，包含本地下载的 QASPER 官方脚本对照、LitSearch 空字段处理；全部断网执行。
 这证明评分实现与入口行为通过测试，不是模型在数据集上的质量成绩。

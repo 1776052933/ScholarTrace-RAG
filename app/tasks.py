@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 from celery import Celery
 
 from app.services.ingestions import IngestionJobService
 from app.papers.database import DatabaseManager
+from app.storage.database_config import data_root as resolve_data_root, database_url as resolve_database_url
 from observability.tracing import flush_traces, trace_span
 
 
@@ -29,9 +29,8 @@ celery_app.conf.update(
 
 
 def _service() -> IngestionJobService:
-    root = Path(os.getenv("AUTO_PAPER_DATA_ROOT", "data/m2")).resolve()
-    database_url = os.getenv("DATABASE_URL") or f"sqlite:///{(root / 'app.sqlite3').as_posix()}"
-    database = DatabaseManager(database_url)
+    root = resolve_data_root()
+    database = DatabaseManager(resolve_database_url(root=root))
     return IngestionJobService(database, root)
 
 

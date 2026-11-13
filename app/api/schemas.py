@@ -45,6 +45,14 @@ class ResearchOptions(BaseModel):
         return self
 
 
+class PdfPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paper_id: str = Field(min_length=1, max_length=512)
+    page: int = Field(ge=1)
+    excerpt: str = Field(min_length=1, max_length=8000)
+
+
 JobStatus = Literal["queued", "running", "cancelling", "completed", "partial_success", "failed", "cancelled", "interrupted"]
 
 

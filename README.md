@@ -1,20 +1,34 @@
-# AutoPaper：学术论文检索与证据问答
+# ScholarTrace RAG：学术论文检索与证据问答
 
-输入研究问题后，项目依次完成查询理解与拆解、多来源论文检索、引文扩展、论文排序、开放全文获取，以及基于论文内容的摘要、知识抽取和问答。
+输入研究问题，系统会拆解检索式、搜索并排序候选论文。选中文献或上传本地 PDF 后，系统在后台建立索引，支持带原文页码的流式问答和跨论文比较。
 
-M2 已接入 FastAPI、MySQL/Alembic 和 Streamlit HTTP 客户端；M3 已完成 Milvus 检索消融和复杂 PDF 首轮对照；M4 已接入 Redis/Celery 选文入库、失败重试和多论文证据问答；M5 接入 LangGraph 搜索与证据补检工作流、MCP 服务及可选的 LangSmith 追踪。M6 加入固定留出集消融、跨论文证据对照、离线 Ragas、人工复核表和 GitHub Actions。先看 [M6 评测报告](docs/M6_REPORT.md)与[M6 运行及演示](docs/M6_RUN_AND_ACCEPTANCE.md)；此前阶段见 [M5 运行与验收](docs/M5_RUN_AND_ACCEPTANCE.md)、[M4 运行与验收](docs/M4_RUN_AND_ACCEPTANCE.md)、[M3 运行与验收](docs/M3_RUN_AND_ACCEPTANCE.md)和[升级计划](docs/UPGRADE_PLAN.md)。数据集位置见[数据集说明](docs/DATASETS.md)；[M0 评测说明](evaluation/M0.md)、[M0 十题基线](evaluation/M0_BASELINE.md)和[M1 对照](evaluation/M1_COMPARISON.md)可用于同输入复测。[版本归档与 M1 工程验收](docs/VERSION_ARCHIVE_AND_M1_ACCEPTANCE.md)记录了早期源码和验收边界。
+## 快速启动
 
-核心 AI 流程已统一为 [LangChain 组件接口与 LangGraph 工作流](docs/LANGCHAIN_ARCHITECTURE.md)：模型生成使用共享 LCEL 链，检索与嵌入提供标准接口；论文发现图编排理解、拆解、搜索、可选引文扩展与排序，问答图编排改写、证据检索、上下文控制、生成与引用校验。FastAPI、MySQL、Celery 保留应用层职责。当前实现没有多个自主 Agent 之间的任务委派与协作机制。
+准备 Docker Compose 和 Python 3.11。在仓库根目录执行：
 
-现已增加[连续对话与流式回答](docs/CONVERSATIONS_AND_STREAMING.md)：MySQL 保存会话和轮次，追问结合近期历史改写后重新检索原文，FastAPI 通过 SSE 实时传递回答正文，Streamlit 支持历史恢复与引用导出。上下文设有字符预算；断流或生成失败的轮次不进入有效历史。
+```powershell
+python -m scripts.init_deployment_env
+# 在 .env 填写模型配置，或按下方说明接入本地 Qwen
+docker compose --env-file .env build api
+docker compose --env-file .env up -d --no-build --wait
+```
 
-论文库现支持[本地 PDF 上传、论文集合与文档管理](docs/LOCAL_PDF_LIBRARY.md)：上传后复用 Celery 入库任务；集合可筛选多论文连续问答，原始 PDF 可下载，失败任务可重试，已有 PDF 可重建索引。[本轮验收记录](docs/LOCAL_PDF_LIBRARY_ACCEPTANCE_20261020.md)包含完整回归与真实入库结果。
+首次运行需准备 BGE-M3、BGE 重排和 Docling 模型缓存，或者允许首次下载。完整配置、端口和停止方式见[部署说明](docs/REPRODUCIBLE_DEPLOYMENT.md)，本地模型见[Qwen 接入](docs/LOCAL_QWEN.md)。打开 Streamlit（默认 `http://127.0.0.1:8501`），API 文档在 `http://127.0.0.1:8000/docs`，MCP 入口在 `http://127.0.0.1:8001/mcp`。
+
+**演示顺序**：上传两篇 PDF → 查看入库进度 → 查询论文表格中的具体数值 → 连续追问 → 跨论文比较并点击引用查看 PDF 原页 → 刷新界面恢复会话。若使用论文搜索入口，可在入库前先展示候选列表和选文。
+
+## 架构与结果
+
+- Streamlit 通过 HTTP 调用 FastAPI，MySQL 保存论文、任务与会话。Redis 和 Celery 承接后台 PDF 入库。
+- 入库用 Docling 保留章节和页码，BGE-M3 生成向量。Milvus 混合召回后用 BGE 重排，再由 LangGraph 编排证据检索、生成与引用解析。更多细节见 [RAG Reader](rag_reader/README.md)和[工作流结构](docs/LANGCHAIN_ARCHITECTURE.md)。
+- 固定 QASPER 200 道开发题和 50 道留出题的原版答案 F1 分别为 0.3333、0.4156。候选提示词修正了回译语言错例，但留出集 F1 降到 0.3848，因此保留原版。这里的 F1 按官方词汇重叠算法计算，逐题事实与拒答核查见[扩展回归报告](docs/QASPER_PROMPT_REGRESSION_20261113.md)。
+- 本地部署默认绑定回环地址。LangSmith 追踪和严格支持性核验均为可选，严格核验实验因过度拒答默认关闭。[追踪配置](docs/LANGSMITH_TRACING.md) · [核验对照](docs/ANSWER_GATE_EVALUATION_20261104.md)
 
 ## 主要模块
 
 | 目录 | 职责 |
 | --- | --- |
-| `ai_components/` | LangChain ChatModel 适配与共享 LCEL 生成链 |
+| `ai_components/` | 共享模型配置与 OpenAI 兼容调用层、LangChain ChatModel 适配及 LCEL 生成链 |
 | `app/research/understanding/`、`app/research/decomposition/` | 理解和拆解研究问题 |
 | `app/research/search/`、`app/research/ranking/` | 多来源论文搜索、引文扩展与候选排序 |
 | `paper_downloader/`、`app/papers/` | 获取开放全文，管理下载状态及论文记录 |
@@ -26,29 +40,22 @@ M2 已接入 FastAPI、MySQL/Alembic 和 Streamlit HTTP 客户端；M3 已完成
 | `app/storage/`、`migrations/` | MySQL 业务表和 Alembic 迁移 |
 | `app/workflows/`、`app/mcp/`、`observability/` | LangGraph 论文发现与搜索图、MCP 工具、LangSmith 追踪 |
 
-论文发现相关实现统一放在 [`app/research/`](app/research/README.md)，论文资源与持久化放在 [`app/papers/`](app/papers/README.md)。旧顶层 `query_understanding`、`query_decomposition`、`search_agent`、`ranking_agent` 和 `literature_database` 导入路径已移除。命令行继续使用 `python main.py`，程序化调用工作流请从 `app.services.workflow` 导入 `AutoPaperWorkflow`。
+论文发现相关实现统一放在 [`app/research/`](app/research/README.md)，论文资源与持久化放在 [`app/papers/`](app/papers/README.md)。旧顶层 `query_understanding`、`query_decomposition`、`search_agent`、`ranking_agent` 和 `literature_database` 导入路径已移除。命令行继续使用 `python main.py`，程序化调用工作流请从 `app.services.workflow` 导入 `AutoPaperWorkflow`。测试代码统一放在 `tests/`，按 `ui/`、`evaluation/`、`downloader/`、`papers/`、`research/` 和根目录功能测试组织。
 
-## 运行
+项目对外统一使用 **ScholarTrace RAG**。`AutoPaperWorkflow` 类名、`Auto_Paper_UI/` 目录及 `AUTO_PAPER_*` 环境变量是现有代码和部署的兼容接口，暂不改名；早期文档中的 AutoPaper 表示同一项目的历史阶段。
 
-建议先看[可复现部署与真实模型回归](docs/REPRODUCIBLE_DEPLOYMENT.md)及[本机真实模型验收结果](docs/REAL_MODEL_DEPLOYMENT_ACCEPTANCE_20261020.md)。
+数据库由 `DATABASE_URL` 明确指定；未设置时，API、worker 和独立论文服务统一使用 `AUTO_PAPER_DATA_ROOT/app.sqlite3`（默认 `data/m2/app.sqlite3`）。Compose 配置 MySQL 并校验数据库类型，启动后可在界面侧栏查看实际后端和库名。旧 `literature.db` 不会被自动读取或删除，迁移方法见 [M2 数据迁移说明](docs/M2_RUN_AND_ACCEPTANCE.md)。
 
-Compose 配置包含 MySQL、Milvus、Redis、API、MCP、Celery worker/beat 和 UI。启动前参阅[M5 运行与验收](docs/M5_RUN_AND_ACCEPTANCE.md)：
-
-```powershell
-python -m scripts.init_deployment_env
-# 在 .env 中填写模型密钥，并配置模型缓存或允许首次下载
-docker compose --env-file .env build api
-docker compose --env-file .env up -d --no-build --wait
-```
-
-界面位于 `http://127.0.0.1:8501`，API 文档位于 `http://127.0.0.1:8000/docs`，MCP 位于 `http://127.0.0.1:8001/mcp`；端口被占用时可在 `.env` 中设置 `SCHOLARTRACE_UI_PORT`、`SCHOLARTRACE_API_PORT` 和 `SCHOLARTRACE_MCP_PORT`。模型和检索密钥由 API 服务端读取；不要提交 `.env` 或本地密钥。首次摄取论文需要下载 BGE-M3 模型，亦可按 M4 验收说明挂载已下载的模型。无 API Key 仍可运行离线测试和已有论文入库；实时搜索及生成回答需要相应密钥。
-
-运行离线测试：
+## 测试与文档
 
 ```powershell
-python -m pytest -q -m "not slow"
+python -m pip install -r requirements-test.txt
+python -m pytest -q tests -m "not slow and not network"
 ```
 
-快速验收的无密钥回归命令见 [M6 运行及演示](docs/M6_RUN_AND_ACCEPTANCE.md)；GitHub Actions 在推送和 PR 时运行关键路径测试与 Compose 配置检查。
+- [部署与固定 PDF 回归](docs/REPRODUCIBLE_DEPLOYMENT.md)
+- [当前评测入口](evaluation/CURRENT.md) · [数据集](docs/DATASETS.md)
+- [会话与流式输出](docs/CONVERSATIONS_AND_STREAMING.md) · [本地论文库](docs/LOCAL_PDF_LIBRARY.md)
+- [M0～M6 与历史验收索引](docs/HISTORY.md)
 
-数据集、PDF、缓存、运行结果和本地密钥均被 `.gitignore` 排除。
+配置密钥保存在本地 `.env`。论文、模型缓存及原始运行结果保存在 Git 忽略的数据目录中。

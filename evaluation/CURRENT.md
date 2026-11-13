@@ -130,6 +130,17 @@ predicted_evidence，可导出为 JSONL 交给官方脚本交叉验证；应使�
 确定生成模型与预算、准备 ScholarQA-CS 来源语料、正式执行问答和检索评测。
 本入口没有新增 Docling/PyMuPDF 对照，这部分仍使用原有 PDF 专项评测。
 
-离线测试：`python -m pytest -q test_current_scoring.py test_current_evaluation.py test_langchain_architecture.py`。
+离线测试：`python -m pytest -q tests/test_current_scoring.py tests/test_current_evaluation.py tests/test_langchain_architecture.py`。
 QASPER 官方脚本对照测试在本地下载数据包存在时执行，CI 缺少脚本时明确 skip。
 使用小型构造数据、假模型，以及临时 Chroma，验证接入行为；不证明真实模型质量或 Milvus 性能。
+
+## 固定错题的生成瓶颈诊断
+
+`python -m evaluation.answer_bottleneck prepare` 验证上一轮 30 题的冻结输入，并将官方证据定位回同一篇论文。
+`run` 使用本机 Qwen 重放系统片段与标注片段，`score` 仅重算本地结果。标注答案不进入模型输入；
+不可回答题的空证据控制与有答案题分开解释。图表说明缺少单元格时单列限制。
+2026-11-08 的 60 次本地调用、重点 7 题核查和标注疑点见
+[错题复核与证据对照报告](../docs/QASPER_ANSWER_BOTTLENECK_20261108.md)。
+
+使用 `--case-ids-file` 可为 QASPER 指定固定题目清单。200 道开发题与 50 道留出题的
+提示词对照见 [单项提示词优化与扩展回归](../docs/QASPER_PROMPT_REGRESSION_20261113.md)。

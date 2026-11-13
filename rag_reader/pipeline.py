@@ -95,6 +95,8 @@ class RAGReader:
         self.extractor = extractor or PaperKnowledgeExtractor(llm_client=shared_client)
         self.qa = qa or PaperQA(
             self.retriever, llm_client=shared_client, top_k=self.settings.retrieval_top_k,
+            verify_support=self.settings.strict_support_enabled,
+            evidence_strategy=self.settings.evidence_strategy,
         )
         self.summarizer = summarizer or PaperSummarizer(llm_client=shared_client)
 
@@ -109,6 +111,10 @@ class RAGReader:
         使用 ``DocumentLoader`` 读取的文本。重新摄取同一论文时会替换该论文原有
         的向量记录，避免旧 Chunk 残留。
         """
+        return self.ingest_prepared(self.prepare_paper(resource))
+
+    def prepare_paper(self, resource: PaperResource) -> tuple[PaperDocument, List[DocumentChunk]]:
+        """只解析和切分文档，不加载 Embedding 模型或修改向量索引。"""
         if not isinstance(resource, PaperResource):
             raise TypeError(
                 "resource must be an app.papers.schema.PaperResource"
@@ -125,7 +131,11 @@ class RAGReader:
         chunks = self.splitter.split(document, pages=cleaned_pages)
         if not chunks:
             raise ValueError(f"paper produced no document chunks: {document.paper_id}")
+        return document, chunks
 
+    def ingest_prepared(self, prepared: tuple[PaperDocument, List[DocumentChunk]]) -> List[DocumentChunk]:
+        """单写者生成向量并替换索引；可与下一篇论文的解析阶段重叠。"""
+        document, chunks = prepared
         # 先完成最耗时且可能失败的向量化，再替换旧索引，降低重摄取时的数据风险。
         embeddings = self.embedding_model.embed_chunks(chunks)
         if hasattr(self.vector_store, "ensure_embedding_compatible"):

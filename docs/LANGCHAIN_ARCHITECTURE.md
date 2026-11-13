@@ -81,14 +81,14 @@ Retriever 适配器保留 paper_id、chunk_id、page、section、title、retriev
 
 ## 验收方式
 
-新增 `test_langchain_architecture.py` 检查真实组件替换、模型与 Retriever 回调、消息顺序、参数与 usage、
+`tests/test_langchain_architecture.py` 检查真实组件替换、模型与 Retriever 回调、消息顺序、参数与 usage、
 流式关闭、引用元数据往返、论文范围隔离、问答图公共路径、无证据分支、无效答案、
 发现图可选分支、日期过滤、任务取消及嵌入接口一致性。
 
 配合现有会话/API/UI/检索/搜索/评测回归，以及本机集成脚本：
 
 ```powershell
-python -m pytest -q test_langchain_architecture.py test_conversation_streaming.py test_m5_workflow.py test_m1_service.py
+python -m pytest -q tests/test_langchain_architecture.py tests/test_conversation_streaming.py tests/test_m5_workflow.py tests/test_m1_service.py
 python -m scripts.chat_acceptance
 ```
 

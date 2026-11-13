@@ -28,18 +28,24 @@ class PaperQA:
         llm_client: Optional[DeepSeekClient] = None,
         *,
         top_k: int = 5,
+        verify_support: bool = False,
+        evidence_strategy: str | None = None,
     ) -> None:
         if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0:
             raise ValueError("top_k must be a positive integer")
         self.retriever = retriever
         self.llm_client = llm_client
         self.top_k = top_k
+        self.verify_support = bool(verify_support)
+        self.evidence_strategy = evidence_strategy
         self._client_lock = Lock()
 
     @property
     def workflow(self):
         from .answer_graph import AnswerGraph
-        return AnswerGraph(self.retriever, self._get_client, self.rewrite_question, top_k=self.top_k)
+        return AnswerGraph(self.retriever, self._get_client, self.rewrite_question,
+                           top_k=self.top_k, verify_support=self.verify_support,
+                           evidence_strategy=self.evidence_strategy)
 
     def ask(self, paper_id: str, question: str, *, config=None) -> RAGAnswer:
         return self.workflow.invoke([paper_id], question, config=config)

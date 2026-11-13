@@ -5,6 +5,7 @@ redelivered message cannot create duplicate work or lose a completed paper.
 """
 from __future__ import annotations
 
+from concurrent.futures import Future, ThreadPoolExecutor
 from copy import deepcopy
 from datetime import timedelta
 from hashlib import sha256
@@ -225,45 +226,114 @@ class IngestionJobService:
             text_dir = papers_dir / "text"
             papers_dir.mkdir(parents=True, exist_ok=True)
             text_dir.mkdir(parents=True, exist_ok=True)
-            for paper_id in options["paper_ids"]:
-                if self.store.get(job_id).status == "cancelling":
-                    break
-                current = next(item for item in (self.store.get(job_id).result or {})["papers"]
-                               if item["paper_id"] == paper_id)
-                if current["status"] == "completed" or current.get("attempts", 0) >= MAX_PAPER_ATTEMPTS:
-                    continue
-                self._update(job_id, lambda row, result, pid=paper_id: self._set_paper(
-                    row, result, pid, status="running", stage="download",
-                    attempts_delta=1, error=None,
-                ))
-                try:
-                    resources = literature.prepare_for_reader(
-                        {"papers": [source[paper_id]]}, target_count=1,
-                        output_dir=str(papers_dir),
-                        engine=options["download_engine"],
-                        timeout=options["download_timeout"], retry_failed=True,
-                    )
-                    if not resources:
-                        failed = [str(item.get("error") or "PDF 不可用")
-                                  for item in literature.last_download_results if not item.get("success")]
-                        raise RuntimeError("下载失败：" + "; ".join(failed or ["未获得可用 PDF"]))
-                    self._update(job_id, lambda row, result, pid=paper_id: self._set_paper(
-                        row, result, pid, status="running", stage="ingest",
-                    ))
-                    outcome = literature.ingest_into_reader(resources, reader, text_output_dir=str(text_dir))
-                    first = next((item for item in outcome if item.get("paper_id") == paper_id), None)
-                    if not first or not first.get("success"):
-                        raise RuntimeError(str((first or {}).get("error") or "解析或向量入库失败"))
-                    self._update(job_id, lambda row, result, pid=paper_id, item=first: self._set_paper(
-                        row, result, pid, status="completed", stage="ingest",
-                        error=None, chunk_count=int(item.get("chunk_count") or 0),
-                    ))
-                except Exception as exc:
-                    logger.exception("Selected-paper ingestion failed: job=%s paper=%s", job_id, paper_id)
-                    self._update(job_id, lambda row, result, pid=paper_id, message=exc: self._set_paper(
-                        row, result, pid, status="failed", stage="failed",
-                        error=_safe_message(f"{type(message).__name__}: {message}"),
-                    ))
+            snapshot = self.store.get(job_id)
+            paper_states = {item["paper_id"]: item for item in (snapshot.result or {})["papers"]}
+            pending_ids = [paper_id for paper_id in options["paper_ids"]
+                           if paper_states[paper_id]["status"] != "completed"
+                           and paper_states[paper_id].get("attempts", 0) < MAX_PAPER_ATTEMPTS]
+            if snapshot.status == "cancelling" or not pending_ids:
+                return self._finish(job_id)
+            # The download coordinator already has a bounded thread pool. Passing
+            # all selected papers together lets it overlap network I/O while its
+            # database writes remain on the worker thread. Parsing, embedding and
+            # vector writes below deliberately stay single-writer.
+            def mark_downloads(row: ResearchJobModel, result: dict[str, Any]) -> None:
+                for paper_id in pending_ids:
+                    self._set_paper(row, result, paper_id, status="running", stage="download",
+                                    attempts_delta=1, error=None)
+
+            self._update(job_id, mark_downloads)
+            if self.store.get(job_id).status == "cancelling":
+                return self._finish(job_id)
+
+            def prepare(ids: list[str]) -> tuple[dict[str, Any], dict[str, str]]:
+                resources = literature.prepare_for_reader(
+                    {"papers": [source[paper_id] for paper_id in ids]}, target_count=len(ids),
+                    output_dir=str(papers_dir), engine=options["download_engine"],
+                    timeout=options["download_timeout"], retry_failed=True,
+                )
+                available = {resource.paper.paper_id: resource for resource in resources}
+                errors = {str(item["paper_id"]): str(item.get("error") or "PDF 不可用")
+                          for item in literature.last_download_results if not item.get("success")
+                          and item.get("paper_id")}
+                return available, errors
+
+            try:
+                available, download_errors = prepare(pending_ids)
+            except Exception:
+                # A batch-level error must not prevent unrelated papers from
+                # finishing. Retry preparation one paper at a time to isolate it.
+                logger.exception("Batch selected-paper preparation failed: job=%s", job_id)
+                available, download_errors = {}, {}
+                for paper_id in pending_ids:
+                    if self.store.get(job_id).status == "cancelling":
+                        break
+                    try:
+                        resources, errors = prepare([paper_id])
+                        available.update(resources)
+                        download_errors.update(errors)
+                    except Exception as exc:
+                        download_errors[paper_id] = _safe_message(f"{type(exc).__name__}: {exc}")
+
+            prefetch_ids = [paper_id for paper_id in pending_ids if paper_id in available]
+            prefetch = (len(prefetch_ids) > 1 and callable(getattr(reader, "prepare_paper", None))
+                        and callable(getattr(reader, "ingest_prepared", None)))
+            executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="paper-parse") if prefetch else None
+            futures: dict[str, Future] = {}
+            next_index = 0
+
+            def schedule_next() -> None:
+                nonlocal next_index
+                if executor is not None and next_index < len(prefetch_ids):
+                    paper_id = prefetch_ids[next_index]
+                    futures[paper_id] = executor.submit(reader.prepare_paper, available[paper_id])
+                    next_index += 1
+
+            schedule_next()
+            try:
+                for paper_id in pending_ids:
+                    if self.store.get(job_id).status == "cancelling":
+                        break
+                    try:
+                        resource = available.get(paper_id)
+                        if resource is None:
+                            raise RuntimeError("下载失败：" + download_errors.get(paper_id, "未获得可用 PDF"))
+                        self._update(job_id, lambda row, result, pid=paper_id: self._set_paper(
+                            row, result, pid, status="running", stage="ingest",
+                        ))
+                        if executor is not None:
+                            try:
+                                prepared = futures.pop(paper_id).result()
+                            except Exception:
+                                schedule_next()
+                                raise
+                            if self.store.get(job_id).status == "cancelling":
+                                break
+                            schedule_next()  # overlap the next PDF parse with this paper's embedding
+                            outcome = literature.ingest_into_reader(
+                                [resource], reader, text_output_dir=str(text_dir),
+                                prepared_by_id={paper_id: prepared},
+                            )
+                        else:
+                            outcome = literature.ingest_into_reader(
+                                [resource], reader, text_output_dir=str(text_dir),
+                            )
+                        first = next((item for item in outcome if item.get("paper_id") == paper_id), None)
+                        if not first or not first.get("success"):
+                            raise RuntimeError(str((first or {}).get("error") or "解析或向量入库失败"))
+                        self._update(job_id, lambda row, result, pid=paper_id, item=first: self._set_paper(
+                            row, result, pid, status="completed", stage="ingest",
+                            error=None, chunk_count=int(item.get("chunk_count") or 0),
+                        ))
+                    except Exception as exc:
+                        logger.exception("Selected-paper ingestion failed: job=%s paper=%s", job_id, paper_id)
+                        self._update(job_id, lambda row, result, pid=paper_id, message=exc: self._set_paper(
+                            row, result, pid, status="failed", stage="failed",
+                            error=_safe_message(f"{type(message).__name__}: {message}"),
+                        ))
+            finally:
+                if executor is not None:
+                    executor.shutdown(wait=True, cancel_futures=True)
             return self._finish(job_id)
         except LostIngestionLease:
             return self.store.get(job_id)
@@ -318,6 +388,9 @@ class IngestionJobService:
             papers = result["papers"]
             if row.status == "cancelling":
                 row.status = row.stage = "cancelled"
+                for item in papers:
+                    if item["status"] == "running":
+                        item["status"] = "queued"
             else:
                 done = sum(item["status"] == "completed" for item in papers)
                 row.status = "completed" if done == len(papers) else "partial_success" if done else "failed"

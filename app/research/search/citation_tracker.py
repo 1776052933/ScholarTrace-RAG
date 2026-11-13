@@ -202,7 +202,7 @@ class OpenAlexCitationClient:
             url += "?" + parse.urlencode(params)
         req = request.Request(
             url,
-            headers={"User-Agent": "AutoPaper-citation-tracker/1.0"},
+            headers={"User-Agent": "ScholarTrace-citation-tracker/1.0"},
         )
         with self._counter_lock:
             self.api_call_count += 1

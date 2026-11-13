@@ -13,7 +13,7 @@ from rag_reader.embedding import embedding_fingerprint
 from rag_reader.evidence_graph import EvidenceGraph
 from rag_reader.llm_client import DeepSeekClient
 from rag_reader.pipeline import RAGReader
-from rag_reader.schema import DocumentChunk
+from rag_reader.schema import DocumentChunk, PaperDocument
 from rag_reader.store_factory import create_vector_store
 
 from .current_datasets import Case, Source
@@ -108,10 +108,21 @@ class CurrentRuntime:
                 path = self.run_dir / "documents" / f"{key}.txt"
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(source.text, encoding="utf-8")
-                chunks = self.reader.ingest_paper(PaperResource(
-                    paper=PaperMetadata(paper_id=source.paper_id, title=source.title),
-                    text_path=str(path),
-                ))
+                if source.sections:
+                    document = PaperDocument(paper_id=source.paper_id, title=source.title,
+                                             text_path=str(path), content=source.text)
+                    records = [{"page": None, "section": s.name, "text": s.text,
+                                "metadata": {"parser": "structured", "section_authoritative": True,
+                                             "item_type": "title" if s.name == "Title" else "text"}}
+                               for s in source.sections]
+                    cleaned = self.reader.cleaner.clean_page_records(records)
+                    chunks = self.reader.splitter.split(document, pages=cleaned)
+                    self.reader.ingest_prepared((document, chunks))
+                else:
+                    chunks = self.reader.ingest_paper(PaperResource(
+                        paper=PaperMetadata(paper_id=source.paper_id, title=source.title),
+                        text_path=str(path),
+                    ))
                 result[source.paper_id] = [c.chunk_id for c in chunks]
                 # These are only per-process source caches, not persistent indices.
                 self.reader._documents.pop(source.paper_id, None)

@@ -218,7 +218,9 @@ def download_pdf(
         finally:
             _release_downloader(direct_downloader)
 
-    # 精确定位不可用或失败时，才回退到标题搜索。
+    # 这里的标题搜索只为定位可下载的 PDF；候选论文发现与排序由 app.research.search 负责。
+    # 精确定位成功时直接返回，不会再发起这轮补源请求。
+    _report(callback, 0.2, "已有定位未取得 PDF，按标题补找开放全文来源")
     engines = _resolve_engines(engine)
 
     for eng_name in engines:
@@ -375,7 +377,7 @@ def search_papers(
     max_results: int = 5,
     engine: str = "auto",
 ) -> List[Dict[str, Any]]:
-    """搜索论文（仅获取信息，不下载 PDF）。
+    """独立下载器的公开搜索工具；主应用的候选发现使用 app.research.search。
 
     Args:
         query:       搜索关键词或标题。

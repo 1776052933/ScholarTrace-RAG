@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import anyio
+import pymupdf as fitz
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from hashlib import sha256
@@ -22,6 +23,7 @@ from app.api.schemas import (
     MultiPaperQuestionResponse, PaperSummary, QuestionRequest, QuestionResponse,
     ResearchOptions, ConversationCreate, ConversationMessageRequest,
     ConversationSummary, ConversationDetail, CollectionNameRequest, CollectionPaperRequest,
+    PdfPreviewRequest,
 )
 from app.config import ModelSettings
 from app.services.jobs import JobBusyError, ResearchJobRunner
@@ -33,8 +35,17 @@ from rag_reader.errors import RAGError
 from rag_reader.config import RAGSettings
 from rag_reader.store_factory import milvus_index_scope
 from app.papers.database import DatabaseManager
+from app.storage.database_config import data_root as resolve_data_root, database_url as resolve_database_url
 from app.papers.models import PaperModel, PaperFileModel
+from app.papers.pdf_preview import render_cited_page
 import app.storage.models  # noqa: F401 - register M2 ORM tables
+
+logger = logging.getLogger(__name__)
+
+
+def _database_name(database: DatabaseManager) -> str:
+    name = database.engine.url.database or ""
+    return Path(name).name if database.engine.url.get_backend_name() == "sqlite" else name
 
 
 def create_app(
@@ -45,10 +56,8 @@ def create_app(
     question_service: Any | None = None,
     ingestion_dispatcher: Callable[[str], None] | None = None,
 ) -> FastAPI:
-    root = Path(data_root or os.getenv("AUTO_PAPER_DATA_ROOT", "data/m2")).resolve()
-    if database_url is None:
-        database_url = os.getenv("DATABASE_URL") or f"sqlite:///{(root / 'app.sqlite3').as_posix()}"
-    database = DatabaseManager(database_url)
+    root = resolve_data_root(data_root)
+    database = DatabaseManager(resolve_database_url(database_url, root=root))
     runner = ResearchJobRunner(database, root, workflow_factory=workflow_factory)
     ingestions = IngestionJobService(database, root, dispatch=ingestion_dispatcher)
     questions = question_service or QuestionService(database, root)
@@ -62,6 +71,8 @@ def create_app(
             with database.engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
             runner.store.mark_interrupted()
+            logger.info("ScholarTrace database ready: backend=%s name=%s",
+                        database.engine.url.get_backend_name(), _database_name(database))
         except Exception as exc:
             raise RuntimeError("M2 database is unavailable or not migrated; run `python -m alembic upgrade head`") from exc
         yield
@@ -77,12 +88,14 @@ def create_app(
     app.state.data_root = root
 
     @app.get("/api/v1/health")
-    def health() -> dict[str, bool]:
+    def health() -> dict[str, bool | str]:
         with database.engine.connect() as connection:
             connection.execute(text("SELECT 1"))
         return {
             "connected": True,
             "database": True,
+            "database_backend": database.engine.url.get_backend_name(),
+            "database_name": _database_name(database),
             "deepseek": bool(ModelSettings.from_env().api_key.get_secret_value()),
             "serpapi": bool(os.getenv("SERPAPI_API_KEY")),
             "openalex": bool(os.getenv("OPENALEX_API_KEY")),
@@ -219,6 +232,26 @@ def create_app(
             raise HTTPException(404, "论文不存在。") from exc
         except FileNotFoundError as exc:
             raise HTTPException(404, "本地 PDF 不可用。") from exc
+
+    @app.get("/api/v1/pdf")
+    def get_pdf_by_id(paper_id: str = Query(min_length=1, max_length=512)) -> FileResponse:
+        # A DOI may contain '/', which cannot safely occupy one path segment.
+        return get_paper_pdf(paper_id)
+
+    @app.post("/api/v1/pdf/preview")
+    def preview_paper_pdf(body: PdfPreviewRequest) -> Response:
+        try:
+            image, matches = render_cited_page(library.pdf_path(body.paper_id), body.page, body.excerpt)
+        except KeyError as exc:
+            raise HTTPException(404, "论文不存在。") from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "本地 PDF 不可用。") from exc
+        except (ValueError, fitz.FileDataError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return Response(image, media_type="image/png", headers={
+            "X-Highlight-Count": str(matches),
+            "Cache-Control": "no-store",
+        })
 
     @app.post("/api/v1/papers/{paper_id}/reindex", status_code=202)
     def reindex_paper(paper_id: str) -> dict[str, str]:

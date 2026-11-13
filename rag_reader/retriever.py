@@ -1,11 +1,13 @@
 """Retrieve paper passages with optional Milvus hybrid search and cross-encoder."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Iterable, List, Mapping, Optional
 
 from .embedding import EmbeddingModel, embedding_fingerprint
 from .schema import DocumentChunk
 from .vector_store import VectorStore
+from .provenance import answer_candidates, needs_paper_body, source_role
 
 
 class PaperRetriever:
@@ -64,20 +66,70 @@ class PaperRetriever:
         self, question: str, limit: int, *,
         paper_id: str | None = None, paper_ids: list[str] | None = None,
     ) -> list[DocumentChunk]:
-        if getattr(self.vector_store, "supports_hybrid", False) and self.retrieval_mode == "bm25":
-            self.vector_store.prepare_bm25()
-            vector = None
-        else:
-            embed = getattr(self.embedding_model, "embed_query", None) or self.embedding_model.embed
-            vector = embed(question)
-            if hasattr(self.vector_store, "ensure_embedding_compatible"):
-                self.vector_store.ensure_embedding_compatible(
-                    embedding_fingerprint(self.embedding_model), len(vector)
-                )
+        vector = self._query_vector(question)
         results = self._search(question, vector, top_k=limit, paper_id=paper_id, paper_ids=paper_ids)
+        results = self._body_candidates(question, results, paper_id=paper_id, top_k=limit)
         if self.reranker is not None:
             results = self.reranker.rerank(question, results, top_k=limit)
         return _chunks(results[:limit], fallback_paper_id=paper_id)
+
+    def _body_candidates(self, question: str, results: list[dict[str, Any]], *,
+                         paper_id: str | None, top_k: int) -> list[dict[str, Any]]:
+        accepted = answer_candidates(question, results)
+        if (paper_id is None or not needs_paper_body(question) or len(accepted) >= 2):
+            return accepted
+        # Older PDF indexes may rank many bibliography entries above the paper's
+        # own abstract. One bounded paper-scoped search recovers body evidence.
+        focus = "What is the main research task and contribution of this paper?"
+        extra = self._search(focus, self._query_vector(focus), top_k=max(top_k, 5), paper_id=paper_id)
+        seen = {row.get("chunk_id") for row in accepted}
+        for row in answer_candidates(question, extra):
+            if row.get("chunk_id") not in seen:
+                accepted.append(row)
+                seen.add(row.get("chunk_id"))
+        return accepted
+
+    def _query_vector(self, question: str) -> list[float] | None:
+        if getattr(self.vector_store, "supports_hybrid", False) and self.retrieval_mode == "bm25":
+            self.vector_store.prepare_bm25()
+            return None
+        embed = getattr(self.embedding_model, "embed_query", None) or self.embedding_model.embed
+        vector = embed(question)
+        if hasattr(self.vector_store, "ensure_embedding_compatible"):
+            self.vector_store.ensure_embedding_compatible(
+                embedding_fingerprint(self.embedding_model), len(vector)
+            )
+        return vector
+
+    def retrieve_per_paper(self, paper_ids: Iterable[str], question: str, *,
+                           top_k: Optional[int] = None, max_workers: int = 3) -> dict[str, List[DocumentChunk]]:
+        """Embed once, overlap bounded Milvus queries, then rerank in input order."""
+        ids = _paper_ids(paper_ids)
+        if not ids:
+            return {}
+        question = _question(question)
+        limit = _top_k(top_k, self.default_top_k)
+        if isinstance(max_workers, bool) or not isinstance(max_workers, int) or max_workers < 1:
+            raise ValueError("max_workers must be a positive integer")
+        vector = self._query_vector(question)
+        if len(ids) == 1 or not getattr(self.vector_store, "supports_hybrid", False):
+            batches = [self._search(question, vector, top_k=limit, paper_id=paper_id) for paper_id in ids]
+        else:
+            with ThreadPoolExecutor(max_workers=min(max_workers, len(ids)),
+                                    thread_name_prefix="paper-evidence") as executor:
+                futures = [executor.submit(self._search, question, vector, top_k=limit,
+                                           paper_id=paper_id) for paper_id in ids]
+                batches = [future.result() for future in futures]
+        output = {}
+        for paper_id, results in zip(ids, batches):
+            results = self._body_candidates(question, results, paper_id=paper_id, top_k=limit)
+            if self.reranker is not None:
+                results = self.reranker.rerank(question, results, top_k=limit)
+            chunks = _chunks(results[:limit], fallback_paper_id=paper_id)
+            if any(chunk.paper_id != paper_id for chunk in chunks):
+                raise ValueError("retriever returned evidence outside the selected paper scope")
+            output[paper_id] = chunks
+        return output
 
     def retrieve(
         self, paper_id: Optional[str], question: str, *, top_k: Optional[int] = None
@@ -122,6 +174,12 @@ def _chunks(
             continue
         page = metadata.get("page")
         section = str(metadata.get("section") or "")
+        role = source_role(text, metadata)
+        metadata["evidence_role"] = role
+        if role == "bibliography":
+            metadata.setdefault("source_section", section)
+            section = "References"
+            metadata["section"] = section
         metadata["paper_id"] = paper_id
         metadata["retrieval_score"] = float(result.get("score") or 0.0)
         metadata["distance"] = float(result.get("distance") or 0.0)

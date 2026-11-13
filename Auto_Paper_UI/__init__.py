@@ -1,1 +1,1 @@
-"""AutoPaper Studio UI package."""
+"""ScholarTrace RAG UI package."""

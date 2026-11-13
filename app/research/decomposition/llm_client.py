@@ -2,7 +2,7 @@
 
 import json
 from ai_components.chains import generate_text
-import os
+from ai_components.provider import DEFAULT_BASE_URL, DEFAULT_MODEL, assistant_content, chat_response, create_client, resolve_provider
 import re
 from typing import Any, Dict, List, Mapping, Optional
 
@@ -21,8 +21,6 @@ except ImportError:  # 允许未安装 SDK 时导入离线拆解功能。
         pass
 
 
-DEFAULT_BASE_URL = "https://api.deepseek.com"
-DEFAULT_MODEL = "deepseek-chat"
 DEFAULT_TEMPERATURE = 0.0
 DEFAULT_MAX_TOKENS = 2048
 
@@ -65,9 +63,8 @@ class DeepSeekClient:
         *,
         _client: Any = None,
     ) -> None:
-        self.api_key = (api_key or os.getenv("DEEPSEEK_API_KEY", "")).strip()
-        self.base_url = (base_url or os.getenv("DEEPSEEK_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
-        self.model = model or os.getenv("DEEPSEEK_MODEL") or DEFAULT_MODEL
+        config = resolve_provider(api_key, base_url, model)
+        self.api_key, self.base_url, self.model = config.api_key, config.base_url, config.model
         self.temperature = _validate_temperature(temperature)
         self.max_tokens = _validate_max_tokens(max_tokens)
         self.timeout_seconds = timeout_seconds
@@ -80,13 +77,8 @@ class DeepSeekClient:
         if _client is not None:
             self._client = _client
         else:
-            if OpenAI is None:
-                raise ImportError("The 'openai' package is required: pip install openai")
-            self._client = OpenAI(
-                api_key=self.api_key,
-                base_url=self.base_url,
-                timeout=self.timeout_seconds,
-            )
+            self._client = create_client(OpenAI, config, timeout=self.timeout_seconds,
+                                         missing_sdk="The 'openai' package is required: pip install openai")
 
     def chat(
         self,
@@ -104,14 +96,9 @@ class DeepSeekClient:
         request_max_tokens = self.max_tokens if max_tokens is None else _validate_max_tokens(max_tokens)
 
         try:
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=request_temperature,
-                max_tokens=request_max_tokens,
-                timeout=self.timeout_seconds,
-            )
-            content = response.choices[0].message.content
+            response = chat_response(self._client, self.model, messages, self.timeout_seconds,
+                                     temperature=request_temperature, max_tokens=request_max_tokens)
+            content = assistant_content(response)
             if content is None:
                 raise DeepSeekJSONError("DeepSeek returned empty message content")
             return str(content)

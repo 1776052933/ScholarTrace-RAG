@@ -39,7 +39,7 @@ docker compose exec api python -m scripts.m4_acceptance_seed --paper "demo-paper
 无密钥回归：
 
 ```powershell
-python -m pytest -q test_m6_evaluation.py test_m5_workflow.py test_m4_async.py test_m3_retrieval.py test_m3_api.py test_m2_api.py test_m1_rag.py test_m1_service.py
+python -m pytest -q tests/test_m6_evaluation.py tests/test_m5_workflow.py tests/test_m4_async.py tests/test_m3_retrieval.py tests/test_m3_api.py tests/test_m2_api.py tests/test_m1_rag.py tests/test_m1_service.py
 ```
 
 CI 使用 GitHub Actions 执行同一组回归、Ragas 小样本和 Compose 配置校验，不需要私有密钥或论文 PDF。大规模模型/数据集评测留在本机，避免 CI 自动下载数 GB 资料。

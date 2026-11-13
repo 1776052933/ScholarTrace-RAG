@@ -2,8 +2,8 @@
 
 import json
 from ai_components.chains import generate_text
+from ai_components.provider import DEFAULT_BASE_URL, DEFAULT_MODEL, assistant_content, chat_response, create_client, resolve_provider
 import logging
-import os
 import re
 from typing import Any, Dict, List, Mapping, Optional
 
@@ -24,8 +24,6 @@ except ImportError:  # 保持不使用 LLM 时 search_agent 仍可导入。
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BASE_URL = "https://api.deepseek.com"
-DEFAULT_MODEL = "deepseek-chat"
 DEFAULT_TIMEOUT_SECONDS = 30.0
 
 
@@ -65,9 +63,8 @@ class DeepSeekClient:
         *,
         _client: Any = None,
     ) -> None:
-        self.api_key = (api_key or os.getenv("DEEPSEEK_API_KEY", "")).strip()
-        self.base_url = (base_url or os.getenv("DEEPSEEK_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
-        self.model = model or os.getenv("DEEPSEEK_MODEL") or DEFAULT_MODEL
+        config = resolve_provider(api_key, base_url, model)
+        self.api_key, self.base_url, self.model = config.api_key, config.base_url, config.model
         self.timeout_seconds = float(timeout_seconds)
 
         if not self.api_key:
@@ -78,13 +75,8 @@ class DeepSeekClient:
         if _client is not None:
             self._client = _client
         else:
-            if OpenAI is None:
-                raise ImportError("The 'openai' package is required: pip install openai")
-            self._client = OpenAI(
-                api_key=self.api_key,
-                base_url=self.base_url,
-                timeout=self.timeout_seconds,
-            )
+            self._client = create_client(OpenAI, config, timeout=self.timeout_seconds,
+                                         missing_sdk="The 'openai' package is required: pip install openai")
         logger.debug("DeepSeekClient initialized: model=%s, base_url=%s", self.model, self.base_url)
 
     def chat(
@@ -103,14 +95,9 @@ class DeepSeekClient:
 
         logger.info("调用 DeepSeek：model=%s, message_count=%d", self.model, len(messages))
         try:
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=float(temperature),
-                max_tokens=max_tokens,
-                timeout=self.timeout_seconds,
-            )
-            content = response.choices[0].message.content
+            response = chat_response(self._client, self.model, messages, self.timeout_seconds,
+                                     temperature=float(temperature), max_tokens=max_tokens)
+            content = assistant_content(response)
             if content is None:
                 raise DeepSeekJSONError("DeepSeek returned empty message content")
             logger.info("DeepSeek 调用完成，响应字符数=%d", len(str(content)))

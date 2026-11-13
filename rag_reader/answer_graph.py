@@ -7,20 +7,26 @@ resumed or silently replayed after a disconnect.
 from __future__ import annotations
 
 import json
+import logging
 from threading import Event
 from typing import Any, TypedDict
 
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
-from ai_components.chains import text_chain
+from ai_components.chains import generate_text, text_chain
 from ai_components.models import ProviderChatModel, as_chat_model
 from observability.tracing import trace_span
 from .evidence_graph import EvidenceGraph
-from .answer_contracts import _fit_evidence, _parse_answer, _required_text
-from .prompts import RAG_QA_PROMPT
+from .answer_contracts import RAGAnswerParseError, _fit_evidence, _parse_answer, _required_text
+from .prompt_adapter import build_messages
+from .prompts import RAG_QA_PROMPT, RAG_SUPPORT_VERIFIER_PROMPT
 from .schema import RAGAnswer
 from .streaming import AnswerTextDecoder
+from .support_gate import strict_gate
+
+
+logger = logging.getLogger(__name__)
 
 
 class AnswerState(TypedDict, total=False):
@@ -40,11 +46,15 @@ class AnswerState(TypedDict, total=False):
 
 
 class AnswerGraph:
-    def __init__(self, retriever, model_factory, question_rewriter, *, top_k=5):
+    def __init__(self, retriever, model_factory, question_rewriter, *, top_k=5,
+                 verify_support=False, evidence_strategy=None, answer_prompt=None):
         self.retriever = retriever
         self.model_factory = model_factory
         self.question_rewriter = question_rewriter
         self.top_k = top_k
+        self.verify_support = bool(verify_support)
+        self.evidence_strategy = evidence_strategy
+        self.answer_prompt = RAG_QA_PROMPT if answer_prompt is None else answer_prompt
         graph = StateGraph(AnswerState)
         for name in ("rewrite", "retrieve", "prepare", "generate", "validate", "abstain"):
             graph.add_node(name, getattr(self, "_" + name))
@@ -82,7 +92,8 @@ class AnswerGraph:
 
     def _retrieve(self, state, config):
         self._check_cancel(config)
-        chunks, evidence = EvidenceGraph(self.retriever, top_k=self.top_k).run(
+        chunks, evidence = EvidenceGraph(self.retriever, top_k=self.top_k,
+                                         strategy=self.evidence_strategy).run(
             state["paper_ids"], state["retrieval_question"], config=config,
         )
         return {"chunks": chunks, "evidence": evidence}
@@ -93,7 +104,7 @@ class AnswerGraph:
 
     def _prepare(self, state, config):
         self._check_cancel(config)
-        prompt = RAG_QA_PROMPT
+        prompt = self.answer_prompt
         ids = state["paper_ids"]
         if state["streaming"]:
             prompt += (
@@ -131,7 +142,7 @@ class AnswerGraph:
                     for fragment in stream:
                         self._check_cancel(config)
                         text = decoder.feed(fragment)
-                        if text:
+                        if text and not self.verify_support:
                             self._emit(state, "delta", {"text": text})
                 finally:
                     stream.close()
@@ -147,8 +158,54 @@ class AnswerGraph:
 
     def _validate(self, state, config):
         self._check_cancel(config)
-        answer = _parse_answer(state["raw_answer"], state["question"], state["chunks"],
-                                       evidence_sufficient=state["evidence"]["sufficient"])
+        try:
+            answer = _parse_answer(state["raw_answer"], state["question"], state["chunks"],
+                                   evidence_sufficient=state["evidence"]["sufficient"],
+                                   reject_unknown_sources=self.verify_support)
+        except RAGAnswerParseError:
+            if not self.verify_support:
+                raise
+            return self._refuse(state, "invalid_answer_format")
+        if not self.verify_support:
+            return {"answer": answer.model_dump(mode="json")}
+
+        chunks = [{"chunk_id": chunk.chunk_id, "paper_id": chunk.paper_id, "text": chunk.text}
+                  for chunk in state["chunks"]]
+        decision = strict_gate(answer.answer, answer.sources, chunks, paper_ids=state["paper_ids"])
+        if decision["action"] == "verify":
+            self._emit(state, "status", {"stage": "verifying"})
+            cited = [chunk for chunk in chunks if chunk["chunk_id"] in answer.sources]
+            messages = build_messages(RAG_SUPPORT_VERIFIER_PROMPT, {
+                "question": state["question"], "retrieval_question": state["retrieval_question"],
+                "proposed_answer": answer.answer,
+                "paper_ids": state["paper_ids"], "cited_chunks": cited,
+            })
+            try:
+                with trace_span("rag.answer_support_verification", as_type="generation",
+                                input={"paper_ids": state["paper_ids"],
+                                       "chunk_ids": answer.sources}) as span:
+                    raw = generate_text(self.model_factory(), messages, config=config,
+                                        temperature=0.0, max_tokens=512)
+                    verdict = json.loads(raw)
+                    decision = strict_gate(answer.answer, answer.sources, chunks,
+                                           paper_ids=state["paper_ids"], verdict=verdict)
+                    span.update(output={"action": decision["action"], "reason": decision["reason"]})
+            except Exception:
+                logger.exception("Answer support verification failed")
+                decision = {"action": "abstain", "reason": "verifier_unavailable"}
+        self._check_cancel(config)
+        if decision["action"] != "answer":
+            return self._refuse(state, decision["reason"])
+        self._emit(state, "delta", {"text": answer.answer})
+        return {"answer": answer.model_dump(mode="json")}
+
+    def _refuse(self, state, reason):
+        text = "根据提供的论文片段无法可靠核实答案，暂不回答。"
+        if reason == "verifier_unavailable":
+            text = "证据核验未完成，暂不回答。"
+        answer = RAGAnswer(question=state["question"], answer=text, sources=[], confidence=0.0)
+        self._emit(state, "status", {"stage": "abstained", "reason": reason})
+        self._emit(state, "delta", {"text": text})
         return {"answer": answer.model_dump(mode="json")}
 
     def _abstain(self, state, config):
